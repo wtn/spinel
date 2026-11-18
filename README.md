@@ -372,8 +372,9 @@ Whole-program type inference drives several compile-time optimizations:
 - **String concat chain flattening**: `a + b + c + d` compiles to a
   single `sp_str_concat4` / `sp_str_concat_arr` call -- one malloc
   instead of N-1 intermediate strings.
-- **Bigint auto-promotion**: loops with `x = x * y` or fibonacci-style
-  `c = a + b` self-referential addition auto-promote to bigint.
+- **Bigint auto-promotion**: loops with `x = x * y`, `x = x * y + d` or
+  fibonacci-style `c = a + b` self-referential addition auto-promote to
+  bigint.
 - **Bigint `to_s`**: divide-and-conquer O(n log²n) via mruby-bigint's
   `mpz_get_str` instead of naive O(n²).
 - **Static symbol interning**: `"literal".to_sym` resolves to a

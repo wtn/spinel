@@ -22392,6 +22392,28 @@ static void bi_promote(Compiler *c, int write_id, const char *lname) {
   if (lv->type == TY_UNKNOWN || lv->type == TY_INT) lv_set_type(lv, TY_BIGINT);
 }
 
+/* Does the sum `v` hold a term that multiplies `lname` itself? Read through
+   parentheses and a chain of `+` and `-`: `n * 256 + d`, `d - n * k`,
+   `n * 10 + c - 48`. The local has to be an operand of the multiplication,
+   not a copy of it: a heap's `l = 2 * i + 1; i = l` is an index, and stays an
+   Integer. */
+static int bi_sum_grows(const NodeTable *nt, int v, const char *lname, int depth) {
+  if (v < 0 || depth > 8) return 0;
+  v = nt_paren_single(nt, v);
+  if (nt_kind(nt, v) != NK_CallNode) return 0;
+  const char *op = nt_str(nt, v, "name");
+  if (!op) return 0;
+  int recv = nt_ref(nt, v, "receiver"), args = nt_ref(nt, v, "arguments");
+  int an = 0; const int *argv = args >= 0 ? nt_arr(nt, args, "arguments", &an) : NULL;
+  if (an != 1) return 0;
+  if (is_mul_or_pow(op)) {
+    const char *rname = bi_local_name(nt, recv), *aname = bi_local_name(nt, argv[0]);
+    return depth > 0 && ((rname && sp_streq(rname, lname)) || (aname && sp_streq(aname, lname)));
+  }
+  if (!sp_streq(op, "+") && !sp_streq(op, "-")) return 0;
+  return bi_sum_grows(nt, recv, lname, depth + 1) || bi_sum_grows(nt, argv[0], lname, depth + 1);
+}
+
 static void bi_scan_loop_node(Compiler *c, int id, const BiPair *pairs, int np) {
   const NodeTable *nt = c->nt;
   if (id < 0) return;
@@ -22414,14 +22436,15 @@ static void bi_scan_loop_node(Compiler *c, int id, const BiPair *pairs, int np) 
             (aname && bi_reaches(pairs, np, lname, aname, 0)))
           bi_promote(c, id, lname);
       }
-      else if (op && sp_streq(op, "+")) {
+      else if (op && sp_streq(op, "+") && rname && aname) {
         /* fibonacci shape: BOTH operands flow back from lname; this
            rejects the linear `i = i + 1`. */
-        if (rname && aname &&
-            bi_reaches(pairs, np, lname, rname, 0) &&
+        if (bi_reaches(pairs, np, lname, rname, 0) &&
             bi_reaches(pairs, np, lname, aname, 0))
           bi_promote(c, id, lname);
       }
+      /* a growing term under a sum: `n = n * 256 + d`, `n = d - n * k` */
+      else if (bi_sum_grows(nt, v, lname, 0)) bi_promote(c, id, lname);
     }
   }
   if (k == NK_LocalVariableOperatorWriteNode) {
@@ -22576,6 +22599,8 @@ static int bi_rw_walk(const NodeTable *nt, int id, int cut) {
       const char *aname = an >= 1 ? bi_local_name(nt, argv[0]) : NULL;
       if (op && is_mul_or_pow(op)) { if (rname || aname) bi_rw_cand(p, cut, id, BI_MUL, dst, rname, aname); }
       else if (op && sp_streq(op, "+") && rname && aname) bi_rw_cand(p, cut, id, BI_ADD, dst, rname, aname);
+      /* a growing term under a sum (bi_sum_grows): it asks no pairs */
+      else if (bi_sum_grows(nt, v, dst, 0)) bi_rw_cand(p, cut, id, BI_OPW, dst, NULL, NULL);
     }
   }
   if (!stop && k == NK_MultiWriteNode) {

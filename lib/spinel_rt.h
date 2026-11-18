@@ -8786,6 +8786,13 @@ static sp_int sp_poly_hkey_i(sp_RbVal v) {
   if (v.tag == SP_TAG_INT) return v.v.i;
   sp_raise_typed_hash_part(v, "key", "Integer");
 }
+/* Integer#chr on a Bignum slot: the character when an sp_int holds the
+   value, else CRuby's RangeError for a Bignum */
+static SP_UNUSED const char *sp_bigint_chr(sp_Bigint *b) {
+  if (!b) sp_nil_recv("chr");
+  if (!sp_bigint_fits_int(b)) sp_raise_cls("RangeError", "bignum out of char range");
+  return sp_int_chr((sp_int)sp_bigint_to_int(b));
+}
 /* An Integer-keyed table's lookup key from a Bignum slot or a boxed value:
    the Integer when an sp_int holds it, else the nil key no entry matches */
 static SP_UNUSED sp_oint sp_bigint_okey(sp_Bigint *b) {

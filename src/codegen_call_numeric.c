@@ -143,6 +143,10 @@ int emit_call_bigint_arms(Compiler *c, int id, Buf *b, const NodeTable *nt, cons
     if ((sp_streq(name, "magnitude") || sp_streq(name, "abs")) && argc == 0) {
       buf_printf(b, "sp_bigint_abs_v(%s)", r); free(rs.p); return 1;   /* (#2418) */
     }
+    /* a Bignum slot holding a small Integer is its character */
+    if (sp_streq(name, "chr") && argc == 0) {
+      buf_printf(b, "sp_bigint_chr(%s)", r); free(rs.p); return 1;
+    }
     if (sp_streq(name, "abs2") && argc == 0) {
       buf_printf(b, "sp_bigint_mul(%s, %s)", r, r); free(rs.p); return 1;   /* (#2424) */
     }
