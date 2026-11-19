@@ -8796,6 +8796,32 @@ static SP_UNUSED sp_oint sp_poly_okey(sp_RbVal v) {
   if (v.tag == SP_TAG_BIGINT) return sp_bigint_okey((sp_Bigint *)v.v.p);
   return sp_oint_nil();
 }
+/* Integer#eql? and #equal? on a Bignum slot against a boxed value. eql? is
+   true for an Integer of the same value. equal? is that when an sp_int holds
+   the value, as CRuby has one object per small Integer, else identity. */
+static SP_UNUSED sp_bool sp_bigint_eql_v(sp_Bigint *a, sp_RbVal v) {
+  if (!a) return v.tag == SP_TAG_NIL;
+  if (v.tag == SP_TAG_INT) return sp_bigint_fits_int(a) && (sp_int)sp_bigint_to_int(a) == v.v.i;
+  if (v.tag == SP_TAG_BIGINT) return v.v.p && sp_bigint_cmp(a, (sp_Bigint *)v.v.p) == 0;
+  return FALSE;
+}
+static SP_UNUSED sp_bool sp_bigint_equal_v(sp_Bigint *a, sp_RbVal v) {
+  if (!a) return v.tag == SP_TAG_NIL;
+  if (sp_bigint_fits_int(a)) return sp_bigint_eql_v(a, v);
+  return v.tag == SP_TAG_BIGINT && (sp_Bigint *)v.v.p == a;
+}
+/* Array#delete of a Bignum from an Integer Array: the element it equals when
+   an sp_int holds the value, else nothing */
+static SP_UNUSED sp_oint sp_IntArray_delete_big(sp_IntArray *a, sp_Bigint *b) {
+  sp_oint k = sp_bigint_okey(b);
+  return k.nil ? sp_oint_nil() : sp_IntArray_delete_o(a, k.v);
+}
+/* A Bignum as the needle of a Float Array search: the Float it equals
+   exactly, else the NaN no element equals */
+static SP_UNUSED sp_ofloat sp_bigint_ofloat(sp_Bigint *b) {
+  double d = b ? sp_bigint_to_double(b) : NAN;
+  return sp_ofloat_of((b && sp_bigint_eq_f(b, d)) ? d : NAN);
+}
 static const char *sp_poly_hkey_s(sp_RbVal v) {
   if (sp_poly_is_strbuf(v)) return sp_rbval_string_bytes(v);
   sp_raise_typed_hash_part(v, "key", "String");

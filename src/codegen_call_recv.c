@@ -92,6 +92,8 @@ static void emit_int_array_delete(Compiler *c, const char *arr, int arg, int nil
     buf_puts(b, "({ ");
     if (!held) { buf_printf(b, "sp_RbVal %s = ", tvn); emit_boxed(c, arg, b); buf_puts(b, "; "); }
     buf_printf(b, "%s.tag == SP_TAG_INT ? sp_IntArray_delete_o(%s, %s.v.i) : ", nd, arr, nd);
+    /* a Bignum that an sp_int holds equals the Integer element */
+    buf_printf(b, "%s.tag == SP_TAG_BIGINT ? sp_IntArray_delete_big(%s, (sp_Bigint *)%s.v.p) : ", nd, arr, nd);
     /* a Float that is a whole number equals the Integer element (2.0 == 2).
        The bounds are sp_int's, which is 32 bits on the -m32 and wasm32
        builds, so the cast is never out of range. */
@@ -100,6 +102,10 @@ static void emit_int_array_delete(Compiler *c, const char *arr, int arg, int nil
                  nd, nd, nd, nd, nd, arr, nd);
     if (nil_elems) buf_printf(b, "%s.tag == SP_TAG_NIL ? (sp_IntArray_delete_nil(%s), sp_oint_nil()) : ", nd, arr);
     buf_puts(b, "sp_oint_nil(); })");
+    return;
+  }
+  if (at == TY_BIGINT) {
+    buf_printf(b, "sp_IntArray_delete_big(%s, ", arr); emit_expr(c, arg, b); buf_puts(b, ")");
     return;
   }
   /* a needle that may itself be nil deletes the nils then */
@@ -416,7 +422,7 @@ static int value_kind_misses(Compiler *c, int node, TyKind ek) {
   TyKind t = comp_ntype(c, node);
   if (t == ek || t == TY_POLY || t == TY_UNKNOWN) return 0;
   int num = ek == TY_INT || ek == TY_FLOAT || ek == TY_BIGINT;
-  if (num && (t == TY_INT || t == TY_FLOAT || (t == TY_BIGINT && ek != TY_INT))) return 0;
+  if (num && (t == TY_INT || t == TY_FLOAT || t == TY_BIGINT)) return 0;
   if (ek == TY_STRING && (t == TY_STRING || t == TY_STRBUF)) return 0;
   if (!num && ek != TY_STRING) return 0;
   if (ty_is_object(t)) {
@@ -428,7 +434,6 @@ static int value_kind_misses(Compiler *c, int node, TyKind ek) {
            comp_method_in_chain(c, cid, "===", NULL) < 0 &&
            (comp_method_in_chain(c, cid, "<=>", NULL) < 0 || !class_is_comparable(c, cid));
   }
-  if (ek == TY_INT && t == TY_BIGINT) return 1;  /* no sp_int equals a Bignum */
   return t == TY_NIL || t == TY_BOOL || t == TY_INT || t == TY_BIGINT || t == TY_FLOAT ||
          t == TY_SYMBOL || t == TY_STRING || t == TY_STRBUF || t == TY_RANGE ||
          t == TY_FLOAT_RANGE || t == TY_STR_RANGE || t == TY_TIME || t == TY_REGEX ||
@@ -543,6 +548,12 @@ static int needle_misses(Compiler *c, int recv, TyKind rt, int node) {
    it cannot, CRuby's answer either way. The strict slot's
    TypeError was wrong here -- `[1, 2].include?(b)` is false for a nil b. */
 static void emit_elem_needle(Compiler *c, TyKind rt, int node, Buf *b) {
+  /* a Bignum against Float elements: the Float it equals exactly, or the
+     NaN no element equals */
+  if (rt == TY_FLOAT_ARRAY && comp_ntype(c, node) == TY_BIGINT) {
+    buf_puts(b, "sp_bigint_ofloat("); emit_expr(c, node, b); buf_puts(b, ")");
+    return;
+  }
   /* the needle as the element kind's oint: a nil (literal or run-time)
      is the nil needle, which the _o searches read as the nil elements */
   emit_oint_expr(c, node, rt == TY_INT_ARRAY ? TY_INT : TY_FLOAT, b);
@@ -2357,7 +2368,8 @@ static int emit_kind_array_iter_call(Compiler *c, int id, Buf *b, const NodeTabl
        sp_RbVal into an sp_int for an Integer array (#4835). */
     Repr catr = repr_of(c, argv[0]);
     TyKind cat = catr.as_ty;
-    int cboxed = (catr.kind == RK_BOXED || cat == TY_NIL);
+    /* (a Bignum needle too: its value may be one an element holds) */
+    int cboxed = (catr.kind == RK_BOXED || cat == TY_NIL || cat == TY_BIGINT);
     /* an Integer or Float needle is read as its oint: a nil one counts the
        nil elements */
     int cscalar = !cboxed && elem_nil_sentinel(c, recv, rt);
@@ -3233,7 +3245,7 @@ else {
        can match -- the Int arm fails the C build on those same shapes. */
     int df_boxed = rt == TY_FLOAT_ARRAY && (a0 == TY_POLY || a0 == TY_UNKNOWN);
     int dnil = elem_nil_sentinel(c, recv, rt);
-    int df_never = rt == TY_FLOAT_ARRAY && !df_boxed && a0 != TY_INT && a0 != TY_FLOAT &&
+    int df_never = rt == TY_FLOAT_ARRAY && !df_boxed && a0 != TY_INT && a0 != TY_FLOAT && a0 != TY_BIGINT &&
                    !(a0 == TY_NIL && dnil);
     int dblk = nt_ref(nt, id, "block");
     if (dblk >= 0 && nt_kind(nt, dblk) == NK_BlockNode) {
@@ -9935,10 +9947,10 @@ static int int_arms_clamp_pow(Compiler *c, int id, Buf *b, const NodeTable *nt, 
       buf_printf(b, "; !_t%d.nil && _t%d.v == (%s); })", te, te, r);
     }
     else if (a0 == TY_INT) { buf_printf(b, "((%s) == (", r); emit_expr(c, argv[0], b); buf_puts(b, "))"); }
-    else if (a0 == TY_POLY) {
+    else if (a0 == TY_POLY || a0 == TY_BIGINT) {   /* (a Bignum an sp_int holds is that Integer: sp_poly_okey) */
       int te = ++g_tmp;
-      buf_printf(b, "({ sp_RbVal _t%d = ", te); emit_boxed(c, argv[0], b);
-      buf_printf(b, "; _t%d.tag == SP_TAG_INT && _t%d.v.i == (%s); })", te, te, r);
+      buf_printf(b, "({ sp_oint _t%d = sp_poly_okey(", te); emit_boxed(c, argv[0], b);
+      buf_printf(b, "); !_t%d.nil && _t%d.v == (%s); })", te, te, r);
     }
     else { buf_puts(b, "(("); emit_expr_for_effect(c, argv[0], b); buf_puts(b, "), 0)"); }
   }

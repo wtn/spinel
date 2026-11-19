@@ -143,6 +143,15 @@ int emit_call_bigint_arms(Compiler *c, int id, Buf *b, const NodeTable *nt, cons
     if ((sp_streq(name, "magnitude") || sp_streq(name, "abs")) && argc == 0) {
       buf_printf(b, "sp_bigint_abs_v(%s)", r); free(rs.p); return 1;   /* (#2418) */
     }
+    /* eql? is == between Integers only; equal? is that for a value an
+       sp_int holds (CRuby's one object per small Integer), else identity */
+    if ((sp_streq(name, "eql?") || sp_streq(name, "equal?")) && argc == 1) {
+      int tr = ++g_tmp;
+      buf_printf(b, "({ sp_Bigint *_t%d = %s; SP_GC_ROOT(_t%d); %s(_t%d, ", tr, r, tr,
+                 name[1] == 'q' && name[2] == 'l' ? "sp_bigint_eql_v" : "sp_bigint_equal_v", tr);
+      emit_boxed(c, argv[0], b); buf_puts(b, "); })");
+      free(rs.p); return 1;
+    }
     if (sp_streq(name, "abs2") && argc == 0) {
       buf_printf(b, "sp_bigint_mul(%s, %s)", r, r); free(rs.p); return 1;   /* (#2424) */
     }
