@@ -6173,6 +6173,7 @@ static int infer_operator_call(Compiler *c, int id, const NodeTable *nt, const c
     { *out = TY_INT; return 1; }
   if (recv >= 0 && rt == TY_BIGINT) {
     if ((sp_streq(name, "even?") || sp_streq(name, "odd?")) && argc == 0) { *out = TY_BOOL; return 1; }
+    if ((sp_streq(name, "eql?") || sp_streq(name, "equal?")) && argc == 1) { *out = TY_BOOL; return 1; }
     if (sp_streq(name, "abs") && argc == 0) { *out = TY_BIGINT; return 1; }
     /* coerce pairs the operand with self; clamp stays in bigint (#3129) */
     if (sp_streq(name, "coerce") && argc == 1) { *out = TY_POLY_ARRAY; return 1; }

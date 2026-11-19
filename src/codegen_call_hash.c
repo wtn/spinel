@@ -926,8 +926,29 @@ int emit_op_hash_nil_recv(Compiler *c, const BopCtx *x, Buf *b) {
    receiver that can be nil must raise under its own name, once the argument
    has run (#9347); value? takes the same block, which names the call as
    written. A receiver the nil fact says is never nil keeps the plain call. */
+/* value? of a Bignum on a Hash of Integer or Float values: the value an
+   sp_int holds, or the Float the Bignum equals exactly, is searched for;
+   any other Bignum is no value of the table */
+static int emit_hash_has_value_big(Compiler *c, int recv, int arg, TyKind rt, const char *hn,
+                                   const char *name, Buf *b) {
+  int th = ++g_tmp, tb = ++g_tmp, tk = ++g_tmp;
+  buf_printf(b, "({ sp_%sHash *_t%d = ", hn, th); emit_expr(c, recv, b);
+  buf_printf(b, "; SP_GC_ROOT(_t%d); sp_Bigint *_t%d = ", th, tb); emit_expr(c, arg, b);
+  buf_printf(b, "; if (!_t%d) sp_nil_recv(\"%s\"); ", th, name);
+  if (ty_hash_val(rt) == TY_INT) {
+    buf_printf(b, "sp_oint _t%d = sp_bigint_okey(_t%d); !_t%d.nil && ", tk, tb, tk);
+    emit_hash_entry(b, rt, "has_value"); buf_printf(b, "(_t%d, _t%d.v); })", th, tk);
+  }
+  else {
+    emit_hash_entry(b, rt, "has_value"); buf_printf(b, "(_t%d, sp_bigint_ofloat(_t%d).v); })", th, tb);
+  }
+  return 1;
+}
+
 int emit_hash_has_value(Compiler *c, int recv, int arg, TyKind rt, const char *hn, int poly,
                         const char *name, Buf *b) {
+  if (!poly && comp_ntype(c, arg) == TY_BIGINT && (ty_hash_val(rt) == TY_INT || ty_hash_val(rt) == TY_FLOAT))
+    return emit_hash_has_value_big(c, recv, arg, rt, hn, name, b);
   /* a Hash that holds the handle searches for the needle's handle (of either face) */
   int hold = !poly && typed_elem_held(rt) == TY_STRBUF;
   if (!recv_never_nil(c, recv)) {

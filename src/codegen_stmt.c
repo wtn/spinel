@@ -10826,7 +10826,10 @@ static void emit_case_obj_eq(Compiler *c, int cond, int t, TyKind pt, Buf *b) {
          <=>, and a boxed compare reaches both (`when ORIGIN` against a
          Point). The pointer compare below answered identity for all. */
       TyKind ct = comp_ntype(c, cond);
-      if (ty_is_object(pt) || ty_is_object(ct)) {
+      /* ... and a Bignum against an Integer or a Float is equal by value
+         (sp_poly_eq), where the C `==` compared the Bignum's pointer */
+      int big_mix = (pt == TY_BIGINT) != (ct == TY_BIGINT) && ty_is_numeric(pt) && ty_is_numeric(ct);
+      if (ty_is_object(pt) || ty_is_object(ct) || big_mix) {
         buf_puts(b, "sp_poly_eq(");
         emit_boxed(c, cond, b);
         buf_puts(b, ", ");
