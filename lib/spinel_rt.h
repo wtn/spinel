@@ -7940,6 +7940,13 @@ static sp_float sp_poly_fdiv(sp_RbVal a, sp_RbVal b) {
      very next line knows how to divide one (sp_poly_to_f_with_rational). */
   if (!sp_poly_numeric_p(a) && !sp_poly_is_rat_kind(a)) sp_raise_poly_nomethod("fdiv", a);
   sp_poly_div_operand(&a, &b, NULL);
+  /* an Integer past 53 bits on either side divides as CRuby's
+     rb_int_fdiv_double does (sp_bigint_fdiv) */
+  int ai = a.tag == SP_TAG_INT || a.tag == SP_TAG_BIGINT, bi = b.tag == SP_TAG_INT || b.tag == SP_TAG_BIGINT;
+  sp_int lim = (sp_int)1 << 53;
+  if (ai && bi && !(a.tag == SP_TAG_INT && b.tag == SP_TAG_INT && a.v.i > -lim && a.v.i < lim && b.v.i > -lim && b.v.i < lim))
+    return sp_bigint_fdiv(sp_poly_as_bigint(a), sp_poly_as_bigint(b));
+  if (a.tag == SP_TAG_BIGINT && b.tag == SP_TAG_FLT) return sp_bigint_fdiv_float((sp_Bigint *)a.v.p, b.v.f);
   return sp_poly_to_f_with_rational(a) / sp_poly_to_f_with_rational(b);
 }
 static sp_RbVal sp_poly_divmod(sp_RbVal a, sp_RbVal b) {

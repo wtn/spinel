@@ -313,11 +313,18 @@ int emit_call_bigint_arms(Compiler *c, int id, Buf *b, const NodeTable *nt, cons
     if (sp_streq(name, "fdiv") && argc == 1) {
       Repr ar = repr_of(c, argv[0]);
       TyKind at = ar.as_ty;
-      buf_printf(b, "(sp_bigint_to_double(%s) / ", r);
-      if (ar.big) { buf_puts(b, "sp_bigint_to_double("); emit_expr(c, argv[0], b); buf_puts(b, ")"); }
-      else if (at == TY_FLOAT) { buf_puts(b, "("); emit_expr(c, argv[0], b); buf_puts(b, ")"); }
-      else { buf_puts(b, "(double)("); emit_int_expr(c, argv[0], b); buf_puts(b, ")"); }
-      buf_puts(b, ")"); free(rs.p); return 1;
+      /* as CRuby's rb_int_fdiv_double: a part past the Float range divides as
+         shifted integers (sp_bigint_fdiv) */
+      if (at == TY_FLOAT && !ar.big) {
+        buf_printf(b, "sp_bigint_fdiv_float(%s, ", r); emit_expr(c, argv[0], b); buf_puts(b, ")");
+      }
+      else {
+        buf_printf(b, "sp_bigint_fdiv(%s, ", r);
+        if (ar.big) emit_expr(c, argv[0], b);
+        else { buf_puts(b, "sp_bigint_new_int((int64_t)("); emit_int_expr(c, argv[0], b); buf_puts(b, "))"); }
+        buf_puts(b, ")");
+      }
+      free(rs.p); return 1;
     }
     if (sp_streq(name, "pow") && argc == 1) {
       buf_printf(b, "sp_bigint_pow(%s, ", r); emit_int_expr(c, argv[0], b); buf_puts(b, ")");

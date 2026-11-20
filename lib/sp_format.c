@@ -771,8 +771,13 @@ sp_int sp_rational_cmp(sp_Rational a, sp_Rational b) {
 sp_bool sp_rational_eq(sp_Rational a, sp_Rational b) {
   return a.num == b.num && a.den == b.den;
 }
+/* as CRuby's rb_int_fdiv_double: a part past 53 bits divides as shifted
+   integers (sp_bigint_fdiv), where dividing the two doubles can round the
+   last digit differently */
 sp_float sp_rational_to_f(sp_Rational a) {
-  return (sp_float)a.num / (sp_float)a.den;
+  sp_int lim = (sp_int)1 << 53;
+  if (a.num > -lim && a.num < lim && a.den < lim) return (sp_float)a.num / (sp_float)a.den;
+  return sp_bigint_fdiv(sp_bigint_new_int(a.num), sp_bigint_new_int(a.den));
 }
 /* 2^e as a wide integer, raising RangeError past the sp_int range. */
 static sp_rat_wide sp_rat_pow2(int e) {

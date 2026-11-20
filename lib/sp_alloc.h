@@ -1211,6 +1211,8 @@ sp_Bigint *sp_bigint_new_double(double d);
 int64_t sp_bigint_to_int(sp_Bigint *b);
 intptr_t sp_bigint_bit_length(sp_Bigint *b);
 sp_Bigint *sp_bigint_gcd(sp_Bigint *a, sp_Bigint *b);
+double sp_bigint_fdiv(sp_Bigint *x, sp_Bigint *y);   /* Integer#fdiv, CRuby's rb_int_fdiv_double */
+double sp_bigint_fdiv_float(sp_Bigint *x, double y);
 sp_Bigint *sp_bigint_div(sp_Bigint *a, sp_Bigint *b);
 sp_Bigint *sp_bigint_add(sp_Bigint *a, sp_Bigint *b);
 sp_Bigint *sp_bigint_mul(sp_Bigint *a, sp_Bigint *b);

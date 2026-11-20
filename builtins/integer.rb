@@ -264,6 +264,23 @@ class Integer
       else
         raise TypeError, "#{other.class} can't be coerced into Integer"
       end
+    elsif other.is_a?(Integer)
+      if self != 0 && other != 0 &&
+         (self.bit_length > 53 || other.bit_length > 53 || self == -9007199254740992 || other == -9007199254740992)
+        # CRuby's rb_int_fdiv_double, for a part with |v| >= 2**53: the boxed
+        # receiver calls sp_poly_fdiv, which divides as CRuby does. The element
+        # of the mixed Array types as poly; an Integer type would recurse here.
+        [self, nil][0].fdiv(other)
+      elsif other == 0 && self.to_f.infinite?
+        raise ZeroDivisionError, "divided by 0"
+      else
+        self.to_f / other
+      end
+    elsif other.is_a?(Float) && other == other && self.to_f.infinite?
+      # CRuby's big_fdiv_float, in sp_poly_fdiv as above
+      [self, nil][0].fdiv(other)
+    elsif other == 0 && self.to_f.infinite?
+      raise ZeroDivisionError, "divided by 0"
     else
       self.to_f / other
     end

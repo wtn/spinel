@@ -6620,7 +6620,7 @@ const char *sp_brat_inspect(sp_BigRational *r) {SP_GC_ROOT(r);
   return sp_str_concat(sp_str_concat(SPL("("), sp_brat_to_s(r)), SPL(")"));
 }
 sp_float sp_brat_to_f(sp_BigRational *r) {SP_GC_ROOT(r);
-  return sp_bigint_to_double(r->num) / sp_bigint_to_double(r->den);
+  return sp_bigint_fdiv(r->num, r->den);
 }
 
 /* ---- Marshal.dump/load helpers -- relocated from spinel_rt.h. 0 optcarrot

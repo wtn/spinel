@@ -12,7 +12,9 @@
 
 
 #include <string.h>
-#include <math.h>      /* isinf: early-exit once a limb fold overflows to Infinity */
+#include <math.h>
+#include <float.h>
+#include <limits.h>
 #include "sp_bigint.h"
 
 /* Defined in spinel_rt.h (linked into the final program); forward-declared
@@ -5597,20 +5599,110 @@ int sp_bigint_mag_u64(sp_Bigint *b, uint64_t *out) {
   return 1;
 }
 
-/* Convert a bigint to the nearest double. Unlike sp_bigint_to_int, which keeps
-   only the low limbs and so truncates any value beyond int64, this folds every
-   limb in (most-significant first, Horner-style) so the full magnitude reaches
-   the double -- matching MRI's Integer#to_f / Rational#to_f. Values too large
-   for a double round to HUGE_VAL (Infinity), as in MRI. */
+/* bits in |z|, 0 for zero */
+static int64_t sp_mpz_bits(const mpz_t *z) {
+  size_t n = z->sz;
+  while (n && !z->p[n - 1]) n--;
+  if (!n) return 0;
+  int tb = 0;
+  for (uint64_t t = z->p[n - 1]; t; t >>= 1) tb++;
+  return (int64_t)(n - 1) * DIG_SIZE + tb;
+}
+/* the bits of |z| from bit lo up (64 of them past 64 bits), with the bits
+   below lo folded into bit 0 as a sticky bit */
+static uint64_t sp_mpz_top64(const mpz_t *z, int64_t lo) {
+  size_t li = (size_t)(lo / DIG_SIZE);
+  int off = (int)(lo % DIG_SIZE), got = 0;
+  uint64_t v = 0;
+  for (size_t i = li; i < z->sz && got < 64; i++) {
+    uint64_t limb = (uint64_t)z->p[i];
+    if (i == li) { v = limb >> off; got = DIG_SIZE - off; }
+    else { v |= limb << got; got += DIG_SIZE; }
+  }
+  int sticky = off && li < z->sz && (z->p[li] & (((mp_limb)1 << off) - 1));
+  for (size_t i = 0; !sticky && i < li && i < z->sz; i++) sticky = z->p[i] != 0;
+  return v | (uint64_t)sticky;
+}
+/* Convert a bigint to the nearest double, as CRuby's big2dbl does: the top
+   64 bits, with the rest as a sticky bit, round once, to the even double on
+   a tie. Past the Float range it is Infinity. */
 double sp_bigint_to_double(sp_Bigint *b) {
   if (b == NULL) return 0.0;
-  mpz_t *z = &b->mpz;
-  double d = 0.0;
-  for (size_t i = z->sz; i > 0; i--) {
-    d = d * (double)DIG_BASE + (double)z->p[i - 1];
-    if (isinf(d)) break;  /* Infinity is absorbing; the remaining limbs can't change it */
+  const mpz_t *z = &b->mpz;
+  int64_t bits = sp_mpz_bits(z);
+  if (bits == 0) return 0.0;
+  double d;
+  if (bits > DBL_MANT_DIG + DBL_MAX_EXP) d = HUGE_VAL;
+  else {
+    int64_t lo = bits > 64 ? bits - 64 : 0;
+    d = ldexp((double)sp_mpz_top64(z, lo), (int)lo);
   }
   return z->sn < 0 ? -d : d;
+}
+
+/* Integer#fdiv and Rational#to_f with a Bignum, as CRuby's
+   rb_int_fdiv_double, rb_big_fdiv_double and big_fdiv compute them: a part
+   past the Float range divides as shifted integers, where converting each
+   part first gave Infinity / Infinity. The shifts count CRuby's 32-bit
+   BDIGITs (BITSPERDIG, DBL_BIGDIG = 2). */
+#define SP_FDIV_DIG 32
+sp_Bigint *sp_bigint_gcd(sp_Bigint *a, sp_Bigint *b);
+sp_Bigint *sp_bigint_abs_v(sp_Bigint *b);
+/* big_fdiv: x shifted to about four doubles' width over y, ey the shift y took */
+static double sp_bigint_fdiv_shifted(sp_Bigint *x, sp_Bigint *y, int64_t ey) {
+  int64_t ex = sp_mpz_bits(&x->mpz) - 4 * SP_FDIV_DIG;
+  if (ex > SP_FDIV_DIG) ex -= SP_FDIV_DIG;
+  else if (ex > 0) ex = 0;
+  if (ex) x = sp_bigint_shr(x, ex);
+  sp_Bigint *z = sp_bigint_div(x, y);
+  int64_t l = ex - ey;
+  if (l > INT_MAX) return HUGE_VAL;
+  if (l < INT_MIN) return 0.0;
+  return ldexp(sp_bigint_to_double(z), (int)l);
+}
+/* big_fdiv_int, on magnitudes with the sign put back */
+static double sp_bigint_fdiv_int(sp_Bigint *x, sp_Bigint *y) {
+  int neg = (x->mpz.sn < 0) != (y->mpz.sn < 0);
+  x = sp_bigint_abs_v(x); y = sp_bigint_abs_v(y);
+  int64_t ey = sp_mpz_bits(&y->mpz) - 2 * SP_FDIV_DIG;
+  if (ey) y = sp_bigint_shr(y, ey);
+  double d = sp_bigint_fdiv_shifted(x, y, ey);
+  return neg ? -d : d;
+}
+/* CRuby's Fixnum range [-2**62, 2**62), and accurate_in_double's |v| < 2**53 */
+static int sp_bigint_fixnum_p(sp_Bigint *b) {
+  uint64_t m;
+  return sp_bigint_mag_u64(b, &m) && (b->mpz.sn < 0 ? m <= ((uint64_t)1 << 62) : m < ((uint64_t)1 << 62));
+}
+static int sp_bigint_accurate_p(sp_Bigint *b) { return sp_mpz_bits(&b->mpz) <= DBL_MANT_DIG; }
+double sp_bigint_fdiv(sp_Bigint *x, sp_Bigint *y) {
+  if (!x) x = sp_bigint_new_int(0);
+  if (!y) y = sp_bigint_new_int(0);
+  if (y->mpz.sn != 0 && !(sp_bigint_accurate_p(x) && sp_bigint_accurate_p(y))) {
+    sp_Bigint *g = sp_bigint_gcd(x, y);
+    if (sp_mpz_bits(&g->mpz) > 1) { x = sp_bigint_div(x, g); y = sp_bigint_div(y, g); }
+  }
+  if (sp_bigint_fixnum_p(x) && sp_bigint_fixnum_p(y) && sp_bigint_accurate_p(y))
+    return (double)sp_bigint_to_int(x) / (double)sp_bigint_to_int(y);
+  if (!sp_bigint_fixnum_p(x) && sp_bigint_fixnum_p(y)) {
+    double dx = sp_bigint_to_double(x);
+    if (!isinf(dx)) return dx / (double)sp_bigint_to_int(y);
+  }
+  return sp_bigint_fdiv_int(x, y);
+}
+/* big_fdiv_float: y's 53-bit mantissa as the integer divisor */
+double sp_bigint_fdiv_float(sp_Bigint *x, double y) {
+  if (!x) x = sp_bigint_new_int(0);
+  if (sp_bigint_fixnum_p(x)) return (double)sp_bigint_to_int(x) / y;
+  double dx = sp_bigint_to_double(x);
+  if (isnan(y)) return y;
+  if (!isinf(dx)) return dx / y;
+  if (isinf(y)) sp_raise_cls("FloatDomainError", y < 0 ? "-Infinity" : "Infinity");
+  int i;
+  double m = frexp(fabs(y), &i);
+  int neg = (x->mpz.sn < 0) != (y < 0);
+  double d = sp_bigint_fdiv_shifted(sp_bigint_abs_v(x), sp_bigint_new_int((int64_t)ldexp(m, DBL_MANT_DIG)), (int64_t)i - DBL_MANT_DIG);
+  return neg ? -d : d;
 }
 
 /* Bitwise AND/OR/XOR on bigints: mruby-bigint's mpz_and / mpz_or / mpz_xor,
