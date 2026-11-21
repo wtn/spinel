@@ -122,6 +122,21 @@ static inline void sp_str_lcache_drop(const char *s) {
   for (unsigned w = 0; w < SP_STR_LCACHE_WAYS; w++)
     if (sp_str_lcache[h + w].s == s) sp_str_lcache[h + w].s = NULL;
 }
+/* sp_str_lcache_drop of `s` when `keep` is 0, nothing when it is 1, in the
+   same steps either way: String#setbyte computes `keep` from the byte it
+   writes, and a write takes the same time for each byte value. `size` is
+   the size word of the header of `s`. */
+static inline void sp_str_lcache_drop_unless(const char *s, uint32_t *size, uint32_t keep) {
+  uint32_t drop = keep - 1u;                  /* all ones to drop, 0 to keep */
+  *size &= ~(SP_STR_SIZE_ASCII7 & drop);
+  uintptr_t dmask = (uintptr_t)0 - (uintptr_t)(drop & 1u);
+  unsigned h = sp_str_lcache_slot(s);
+  for (unsigned w = 0; w < SP_STR_LCACHE_WAYS; w++) {
+    uintptr_t e = (uintptr_t)sp_str_lcache[h + w].s;
+    uintptr_t hit = (uintptr_t)0 - (uintptr_t)(e == (uintptr_t)s);
+    sp_str_lcache[h + w].s = (const char *)(e & ~(hit & dmask));
+  }
+}
 void sp_str_lcache_clear(void);
 int  sp_gc_collection_wanted(void);
 void sp_stw_collect(void);   /* lib/sp_sched.c: stop-the-world collect (threaded) */

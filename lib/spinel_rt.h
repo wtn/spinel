@@ -38,7 +38,9 @@ const char *sp_str_setbyte_cow(const char *s, sp_int i, sp_int v);
    place and inline where the handle owns its payload (0xfd) and the index
    is in it. A byte below 0x80 written into a String a scan proved 7-bit
    leaves it 7-bit, with the character count it had; any other byte forgets
-   both (sp_str_lcache_drop), as a change through sp_fd_publish does.
+   both, as a change through sp_fd_publish does. The choice is made without
+   a branch on the byte (sp_str_lcache_drop_unless), so the write takes the
+   same time for each byte value.
    Anything else -- a range error, a payload the handle does not own --
    takes sp_str_setbyte_cow's route. Answers the value. */
 static inline sp_int sp_String_setbyte(sp_String *s, sp_int i, sp_int v) {
@@ -46,7 +48,8 @@ static inline sp_int sp_String_setbyte(sp_String *s, sp_int i, sp_int v) {
   sp_int n = s->len, j = i < 0 ? i + n : i;
   if (SP_LIKELY(((const unsigned char *)d)[-1] == 0xfd && j >= 0 && j < n)) {
     sp_str_hdr *h = (sp_str_hdr *)sp_fd_base(d);
-    if (!((h->size & SP_STR_SIZE_ASCII7) && (unsigned char)v < 0x80)) sp_str_lcache_drop(d);
+    uint32_t keep = ((h->size & SP_STR_SIZE_ASCII7) >> 30) & ((((uint32_t)v >> 7) & 1u) ^ 1u);
+    sp_str_lcache_drop_unless(d, &h->size, keep);
     h->hash = 0;
     d[j] = (char)(v & 0xff);
     return v;
