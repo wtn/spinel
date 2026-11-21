@@ -350,7 +350,7 @@ static inline sp_RbVal sp_bm_receiver(const sp_BoundMethod *m) {
   }
 }
 static inline sp_bool sp_bm_recv_same(sp_RbVal x, sp_RbVal y) {
-  if (x.tag != y.tag || x.cls_id != y.cls_id) return 0;
+  if (x.tag != y.tag || (x.tag != SP_TAG_INT && x.cls_id != y.cls_id)) return 0;
   /* a Float is the whole double: on a 32-bit target sp_int is half of it, and
      1.5 and 2.5 share their low word (compared by bits, as CRuby compares the
      object: 0.0 and -0.0 are two receivers) */

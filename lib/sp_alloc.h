@@ -605,6 +605,11 @@ void *sp_pl_realloc(void *p, size_t newn);   /* lib/sp_slab.c: a slab block know
                                           proc runs on that fiber). */
 
 static inline sp_RbVal sp_box_int(sp_int v)    { sp_RbVal r; r.tag = SP_TAG_INT;  r.cls_id = 0; r.v.i = v; return r; }
+/* An Integer box made from a Bignum slot whose value fits an sp_int carries
+   this mark in its cls_id: the poly + - * ** and << of such a box grow into
+   a Bignum, as the Bignum-typed arithmetic it came from does. */
+#define SP_INT_FROM_BIG 1
+static inline sp_RbVal sp_box_int_big(sp_int v) { sp_RbVal r = sp_box_int(v); r.cls_id = SP_INT_FROM_BIG; return r; }
 /* A String value is boxed as its handle. Borrow its payload for byte reads. */
 static inline sp_bool sp_rbval_is_string(sp_RbVal v) {
   return v.tag == SP_TAG_OBJ && v.cls_id == SP_BUILTIN_STRBUF && v.v.p;

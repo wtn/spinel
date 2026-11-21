@@ -87,6 +87,7 @@ VALUE sp_cext_value(sp_RbVal v) {
     install_hooks();
     if (v.tag == SP_TAG_OBJ && v.v.p && v.cls_id >= 0 && sp_cext_data_class_fn && sp_cext_data_class_fn(v.cls_id))
         v.cls_id = (int)((sp_cext_data *)v.v.p)->cls_id;
+    if (v.tag == SP_TAG_INT) v.cls_id = 0;
     if (v.tag == SP_TAG_NIL) return Qnil;
     if (v.tag == SP_TAG_BOOL) return v.v.b ? Qtrue : Qfalse;
     if (v.tag == SP_TAG_INT && v.v.i >= RUBY_FIXNUM_MIN && v.v.i <= RUBY_FIXNUM_MAX)

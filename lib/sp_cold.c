@@ -5859,7 +5859,7 @@ sp_RbVal sp_box_bigint(sp_Bigint *b) {
   uint64_t mag;
   if (b && sp_bigint_mag_u64(b, &mag) && mag <= (uint64_t)INTPTR_MAX) {
     sp_int v = (sp_int)mag;
-    return sp_box_int(sp_bigint_sign(b) < 0 ? -v : v);
+    return sp_box_int_big(sp_bigint_sign(b) < 0 ? -v : v);
   }
   sp_RbVal r; r.tag = SP_TAG_BIGINT; r.cls_id = 0; r.v.p = b; return r;
 }

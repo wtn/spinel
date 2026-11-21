@@ -48,6 +48,11 @@ almost always a bug or a case that needs `promote`; raising surfaces it at the
 point it happens rather than producing a truncated value. This is a deliberate
 deviation from CRuby (which would never raise here) in favour of loudness.
 
+A Bignum-typed value keeps growing into a Bignum in every mode. That holds
+for a small one read back out of a poly slot too: its `+`, `-`, `*`, `**`
+and `<<` promote as the Bignum-typed arithmetic does, where an Integer-typed
+value in the same slot raises.
+
 A Float converted to an `Integer` outside the signed 64-bit range (`1e300.round`,
 `1.0e19.to_i`, `floor`, `ceil`) raises `RangeError` (`float out of Integer range
 (Bignum promotion pending)`) in every mode but `promote`, which answers the bignum
