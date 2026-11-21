@@ -31,6 +31,7 @@ module Open3
     out = binmode ? "".b : ""
     err = binmode ? "".b : ""
     status = nil
+    pid = nil
     begin
       File.write(inf, stdin_data.to_s) if inf
       # no stdin_data: an empty stdin, as CRuby's closed pipe -- the child
@@ -48,6 +49,8 @@ module Open3
       out = __read(outf, binmode) if File.exist?(outf)
       err = __read(errf, binmode) if !merge && keep_err && File.exist?(errf)
     ensure
+      # CRuby's popen_run joins its wait thread in an ensure
+      Process.waitpid(pid) if pid && status.nil?
       [outf, errf, inf].each { |f| File.delete(f) if f && File.exist?(f) }
       Dir.rmdir(dir)
     end
