@@ -546,7 +546,7 @@ printf 'require "mathx"\nputs Mathx.mx_add(20, 21)\n' > spinel-mathx/bin/mxdemo.
 
 # app-as-root: unconsented build is refused with instructions
 cd spinel-mathx
-OUT=$("$SPIN" build 2>&1) && fail "unconsented native build must be refused"
+OUT=$("$SPIN" build 2>&1 </dev/null) && fail "unconsented native build must be refused"
 echo "$OUT" | grep -q "declares a native build step" || fail "refusal message"
 echo "$OUT" | grep -q "allow-native-build" || fail "refusal hint"
 # consented: the patch applied to the scratch copy biases the sum by one
@@ -588,7 +588,7 @@ cd nbconsumer
 # fetch never runs a native build (R2: packages compute nothing at fetch)
 "$SPIN" fetch >/dev/null 2>&1
 # unconsented dependent build is refused; `spin trust` records durable consent
-OUT=$("$SPIN" build 2>&1) && fail "unconsented dependent native build must be refused"
+OUT=$("$SPIN" build 2>&1 </dev/null) && fail "unconsented dependent native build must be refused"
 "$SPIN" trust mathx | grep -q '^trusted: mathx' || fail "spin trust"
 OUT=$("$SPIN" run 2>&1)
 expect "native lib-dependency run (patched)" "201" "$(echo "$OUT" | tail -1)"
