@@ -3519,6 +3519,7 @@ int emit_builtin_scoped_const(Compiler *c, int par_id, const char *par_nm, const
     if (sp_streq(nm, "SYNC"))     { buf_puts(b, "((sp_int)O_SYNC)"); return 1; }
     if (sp_streq(nm, "DSYNC"))    { buf_puts(b, "((sp_int)O_DSYNC)"); return 1; }
     if (sp_streq(nm, "BINARY"))   { buf_puts(b, "((sp_int)0)"); return 1; }
+    if (sp_streq(nm, "SHARE_DELETE")) { buf_puts(b, "((sp_int)0)"); return 1; }   /* 0 off Windows, as in CRuby */
     /* the flock(2) operation constants (#2808) */
     if (sp_streq(nm, "LOCK_SH")) { buf_puts(b, "((sp_int)LOCK_SH)"); return 1; }
     if (sp_streq(nm, "LOCK_EX")) { buf_puts(b, "((sp_int)LOCK_EX)"); return 1; }

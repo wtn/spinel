@@ -11075,7 +11075,7 @@ TyKind builtin_scoped_const_type(Compiler *c, int par_id, const char *par_nm, co
                sp_streq(nm, "CREAT") || sp_streq(nm, "EXCL") || sp_streq(nm, "TRUNC") ||
                sp_streq(nm, "APPEND") || sp_streq(nm, "NONBLOCK") || sp_streq(nm, "BINARY") ||
                sp_streq(nm, "NOFOLLOW") || sp_streq(nm, "NOCTTY") || sp_streq(nm, "SYNC") ||
-               sp_streq(nm, "DSYNC") ||
+               sp_streq(nm, "DSYNC") || sp_streq(nm, "SHARE_DELETE") ||
                sp_streq(nm, "LOCK_SH") || sp_streq(nm, "LOCK_EX") || sp_streq(nm, "LOCK_UN") ||
                sp_streq(nm, "LOCK_NB")))
       return TY_INT;   /* the open(2)/flock(2) flag constants (#2788, #2808) */
