@@ -1119,7 +1119,7 @@ static sp_int sp_File_write_len(sp_File *f, const char *s, size_t n) {SP_GC_ROOT
   /* An IO.pipe write end is sync, so setvbuf left it unbuffered and stdio
      holds nothing between calls: the raw loop is what fwrite would do anyway,
      and it can park between attempts. Every other handle keeps stdio. */
-  if (f->sync_on && sp_io_parkable(f)) return sp_sock_write(f, s, n);
+  if (f->sync_on == 1 && sp_io_parkable(f)) return sp_sock_write(f, s, n);
   return (sp_int)fwrite(s, 1, n, f->fp);
 }
 
@@ -1169,7 +1169,7 @@ sp_int sp_File_syswrite(sp_File *f, const char *s, size_t n) {SP_GC_ROOT(f);SP_G
   sp_io_check_writable(f);
   if (!s) return 0;
   if (f->is_sock || f->own_buf == SP_OWN_SOCK) return sp_sock_write(f, s, n);
-  if (f->sync_on && sp_io_parkable(f)) return sp_sock_write(f, s, n);
+  if (f->sync_on == 1 && sp_io_parkable(f)) return sp_sock_write(f, s, n);
   return sp_io_write_raw(f, s, n);
 }
 
@@ -1325,7 +1325,7 @@ sp_File *sp_io_stdout(void) {
 
 sp_File *sp_io_stderr(void) {
   static sp_StaticFile s = { SP_STATIC_FILE_LEAD, { NULL, SPL("<STDERR>"), SPL("w") } };
-  if (!s.f.fp) s.f.fp = stderr;
+  if (!s.f.fp) { s.f.fp = stderr; s.f.sync_on = 2; }
   return &s.f;
 }
 
@@ -3207,6 +3207,13 @@ sp_File *sp_File_reopen_io(sp_File *f, sp_File *other) {SP_GC_ROOT(f);SP_GC_ROOT
   f->path = other->path;
   f->mode = other->mode;
   f->shut = other->shut;        /* the sides the other socket has shut, none for a file */
+  /* STDERR takes the other's sync, as it takes the other's mode: a STDERR
+     that turns sync writes through stdio unbuffered (sync_on 2), and one
+     already sync keeps its sync_on (1 after #sync=, the parkable writes) */
+  if (f->fp == stderr) {
+    if (!sp_File_sync_p(other)) f->sync_on = 0;
+    else if (!f->sync_on) { setvbuf(f->fp, NULL, _IONBF, 0); f->sync_on = 2; }
+  }
   f->lineno = 0;
   return f;
 }
@@ -3271,7 +3278,7 @@ sp_File *sp_File_dup(sp_File *f, int keep_frozen) {SP_GC_ROOT(f);
   g->is_file = f->is_file;
   g->frozen = keep_frozen ? f->frozen : 0;
   g->timeout = SP_ATOMIC_LOAD(&f->timeout, __ATOMIC_ACQUIRE);
-  if (f->sync_on || f->fp == stderr) sp_File_set_sync(g, 1);
+  if (f->sync_on) sp_File_set_sync(g, 1);
   return g;
 }
 /* IO#close_on_exec? / #close_on_exec= via the FD_CLOEXEC descriptor flag. */
@@ -3557,6 +3564,8 @@ sp_File *sp_File_reopen(sp_File *f, const char *path, const char *mode) {SP_GC_R
      #binmode or #set_encoding no longer decides what a read answers */
   if (mode && mode[0]) { f->bin_flag = 0; f->ext_enc = 0; }
   if (om != km) f->mode = om;
+  /* a mode given replaces STDERR's sync too, as in CRuby */
+  if (f->sync_on == 2 && mode && mode[0]) f->sync_on = 0;
   f->lineno = 0;
   return f;
 }
