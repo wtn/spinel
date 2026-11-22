@@ -23983,6 +23983,9 @@ static sp_RbVal sp_poly_enum_proc(sp_RbVal recv, int op, sp_Proc *blk) {
 static const struct { const char *name; int no; } sp_sig_table[] = {
   {SP_SIGN("EXIT"), 0}, {SP_SIGN("HUP"), SIGHUP}, {SP_SIGN("INT"), SIGINT}, {SP_SIGN("QUIT"), SIGQUIT},
   {SP_SIGN("ILL"), SIGILL}, {SP_SIGN("TRAP"), SIGTRAP}, {SP_SIGN("ABRT"), SIGABRT}, {SP_SIGN("IOT"), SIGABRT},
+#ifdef SIGEMT
+  {SP_SIGN("EMT"), SIGEMT},
+#endif
   {SP_SIGN("BUS"), SIGBUS}, {SP_SIGN("FPE"), SIGFPE}, {SP_SIGN("KILL"), SIGKILL}, {SP_SIGN("USR1"), SIGUSR1},
   {SP_SIGN("SEGV"), SIGSEGV}, {SP_SIGN("USR2"), SIGUSR2}, {SP_SIGN("PIPE"), SIGPIPE}, {SP_SIGN("ALRM"), SIGALRM},
   {SP_SIGN("TERM"), SIGTERM}, {SP_SIGN("CHLD"), SIGCHLD}, {SP_SIGN("CLD"), SIGCHLD}, {SP_SIGN("CONT"), SIGCONT},
