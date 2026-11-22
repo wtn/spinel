@@ -1601,6 +1601,41 @@ int sp_process_rlimit_defined(const char *name) {
   return sp_rlimit_lookup(name, &id);
 }
 
+/* the clocks of some platforms' <time.h>: CLOCK_MONOTONIC_RAW on Linux
+   and macOS, the rest on macOS */
+static const struct { const char *name; int id; } sp_clock_names[] = {
+#ifdef CLOCK_MONOTONIC_RAW
+  { "MONOTONIC_RAW", CLOCK_MONOTONIC_RAW },
+#endif
+#ifdef CLOCK_MONOTONIC_RAW_APPROX
+  { "MONOTONIC_RAW_APPROX", CLOCK_MONOTONIC_RAW_APPROX },
+#endif
+#ifdef CLOCK_UPTIME_RAW
+  { "UPTIME_RAW", CLOCK_UPTIME_RAW },
+#endif
+#ifdef CLOCK_UPTIME_RAW_APPROX
+  { "UPTIME_RAW_APPROX", CLOCK_UPTIME_RAW_APPROX },
+#endif
+  { NULL, 0 }
+};
+static int sp_clock_lookup(const char *name, int *id) {
+  for (size_t i = 0; sp_clock_names[i].name; i++)
+    if (strcmp(name, sp_clock_names[i].name) == 0) { *id = sp_clock_names[i].id; return 1; }
+  return 0;
+}
+
+/* Process::CLOCK_<name>, and defined?(Process::CLOCK_<name>), for those */
+sp_int sp_process_clock_id(const char *name) {
+  int id;
+  if (!sp_clock_lookup(name, &id))
+    sp_raise_cls("NameError", sp_sprintf("uninitialized constant Process::CLOCK_%s", name));
+  return id;
+}
+int sp_process_clock_defined(const char *name) {
+  int id;
+  return sp_clock_lookup(name, &id);
+}
+
 /* StringValueCStr's check on a String name */
 static void sp_rlimit_name_nul(sp_RbVal v, const char *name) {
   if (sp_rbval_is_string(v) && memchr(name, 0, sp_str_byte_len(name)))

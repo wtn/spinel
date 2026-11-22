@@ -19631,6 +19631,8 @@ sp_RbVal sp_process_rlim_const(int k);
 int sp_process_rlim_defined(int k);
 sp_int sp_process_rlimit_id(const char *name);
 int sp_process_rlimit_defined(const char *name);
+sp_int sp_process_clock_id(const char *name);
+int sp_process_clock_defined(const char *name);
 unsigned long long sp_process_rlimit_value(sp_RbVal v, const char *name);
 int sp_process_rlimit_resource(sp_RbVal v, const char *name);
 void sp_process_setrlimit_ids(int res, unsigned long long cur, unsigned long long max);

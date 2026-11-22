@@ -3553,6 +3553,8 @@ int emit_builtin_scoped_const(Compiler *c, int par_id, const char *par_nm, const
        C macro so the value is the platform's own clock id, as CRuby's is. */
     if (sp_streq(nm, "CLOCK_PROCESS_CPUTIME_ID")) { buf_puts(b, "((sp_int)CLOCK_PROCESS_CPUTIME_ID)"); return 1; }
     if (sp_streq(nm, "CLOCK_THREAD_CPUTIME_ID"))  { buf_puts(b, "((sp_int)CLOCK_THREAD_CPUTIME_ID)"); return 1; }
+    /* the clocks a platform may lack, by name from the run time */
+    if (process_clock_const(nm)) { buf_printf(b, "sp_process_clock_id(\"%s\")", nm + 6); return 1; }
     /* getpriority/setpriority `which` selectors (#3046) */
     if (sp_streq(nm, "PRIO_PROCESS")) { buf_puts(b, "((sp_int)PRIO_PROCESS)"); return 1; }
     if (sp_streq(nm, "PRIO_PGRP"))    { buf_puts(b, "((sp_int)PRIO_PGRP)"); return 1; }
@@ -4398,6 +4400,11 @@ static int emit_defined_value(Compiler *c, int id, Buf *b, const NodeTable *nt, 
       /* the platform's sys/resource.h decides which RLIMIT_* exist, where
          the program defines no constant of that name in Process */
       buf_printf(b, "(sp_process_rlimit_defined(\"%s\") ? SPL(\"constant\") : NULL)", nt_str(nt, v, "name") + 7);
+      return 1;
+    }
+    else if (vk == NK_ConstantPathNode && process_clock_path(c, v)) {
+      /* the platform's <time.h> decides which of these clocks exist */
+      buf_printf(b, "(sp_process_clock_defined(\"%s\") ? SPL(\"constant\") : NULL)", nt_str(nt, v, "name") + 6);
       return 1;
     }
     else if (vk == NK_ConstantPathNode && nt_kind(nt, nt_ref(nt, v, "parent")) == NK_ConstantReadNode &&

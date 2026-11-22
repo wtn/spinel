@@ -1896,6 +1896,7 @@ int builtin_class_id(const char *name);
 int builtin_class_parent_id(int id);   /* analyze_util.c */
 int is_builtin_class_name(const char *n);
 int process_rlimit_const(const char *n);
+int process_clock_const(const char *n);
 int is_builtin_module_name(const char *n);
 int const_path_in_closed_builtin(Compiler *c, int id);
 int const_path_misses_toplevel(Compiler *c, int id);

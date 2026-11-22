@@ -2407,6 +2407,10 @@ int comp_const_undefined(Compiler *c, int v);
 int comp_defined_guard_true(Compiler *c, int pred);
 int comp_defined_early(Compiler *c, int pred, const char **early, int cap);
 int comp_defined_reads(Compiler *c, int pred, int *reads, int cap);
+/* Process::CLOCK_UPTIME_RAW or ::Process::CLOCK_UPTIME_RAW (a name of
+   process_clock_const) where the program defines no constant of that name
+   in Process: defined? checks the platform's clocks at run time */
+int process_clock_path(Compiler *c, int v);
 /* a constant path whose leaf is no member of the class or module its parent
    names (analyze_util.c) */
 int const_path_misses_member(Compiler *c, int id);
