@@ -53,6 +53,9 @@
 #include <stdio_ext.h> /* __fpurge, for the stream a #reopen moves */
 #endif
 #include <poll.h>    /* POLLIN for the socket read park */
+#ifdef __APPLE__
+#include <sys/select.h> /* select(2) for the read park of a FIFO */
+#endif
 #include <time.h>
 
 /* Per-call "do not block" for send(2). Linux honours it; Darwin and the BSDs
@@ -595,6 +598,66 @@ static void sp_io_park_fd_readable(int fd, const unsigned char *closed) {
 #endif
 }
 
+#ifdef __APPLE__
+/* On macOS, once the reader of a named FIFO (a pipe's st_dev is 0) has
+   taken the bytes, poll(2) returns 0 and kqueue returns no event at the
+   writer's close, and select(2) returns the descriptor readable (read(2)
+   then returns 0).
+   The read park of a named FIFO is a select between waits of 1 ms, doubling
+   up to 100 ms, and returns 1; for another descriptor it returns 0 at once.
+   A named FIFO at or past FD_SETSIZE raises IOError, as IO.select does.
+   The FIFO open's park (sp_io_wait_fd_readable) waits for a writer's byte
+   and stays as it is. */
+static int sp_io_park_named_fifo(int fd, const unsigned char *closed) {
+  struct stat st;
+  if (fd < 0 || fstat(fd, &st) != 0 || !S_ISFIFO(st.st_mode) || st.st_dev == 0) return 0;
+  if (fd >= FD_SETSIZE) sp_raise_cls("IOError", "file descriptor out of range");
+  for (int ms = 1;; ms = ms < 64 ? ms * 2 : 100) {
+    fd_set rs;
+    FD_ZERO(&rs);
+    FD_SET(fd, &rs);
+    struct timeval tv = { 0, 0 };
+    int r = SP_SIG_BLOCKING(select(fd + 1, &rs, NULL, NULL, &tv));
+    if (r > 0 || (r < 0 && errno != EINTR)) return 1;
+    if (closed && SP_ATOMIC_LOAD(closed, __ATOMIC_RELAXED)) return 1;
+#ifdef SP_THREADS
+    extern int sp_sched_wait_io_timeout_unless(int, short, double, const unsigned char *);
+    if (sp_sched_wait_io_timeout_unless(fd, POLLIN, ms / 1000.0, closed)) return 1;
+#else
+    extern void sp_Thread_pass(void);
+    extern int sp_sched_other_threads_live(void);
+    struct pollfd p = { .fd = fd, .events = POLLIN, .revents = 0 };
+    if (SP_SIG_BLOCKING(poll(&p, 1, sp_sched_other_threads_live() ? 1 : ms)) > 0) return 1;
+    sp_Thread_pass();
+#endif
+  }
+}
+
+/* The stream of a named FIFO has met its end (feof, or fifo_eof after a
+   read(2) that returned 0), and select(2) returns the descriptor readable
+   no more. One read(2) of a byte with O_NONBLOCK set says what the FIFO is
+   now. 0: no writer, and the caller's read returns nil at once (returns
+   1). A byte a later writer sent, put back with ungetc, or EAGAIN for a
+   later writer that has sent nothing: the end is cleared and the caller
+   parks as before (returns 0). */
+static int sp_io_fifo_at_end(sp_File *f, FILE *fp, int fd) {
+  struct stat st;
+  if (!feof(fp) && !f->fifo_eof) return 0;
+  if (fstat(fd, &st) != 0 || !S_ISFIFO(st.st_mode) || st.st_dev == 0) return 0;
+  char ch;
+  ssize_t r;
+  int fl = fcntl(fd, F_GETFL);
+  if (fl >= 0 && !(fl & O_NONBLOCK)) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+  do { r = read(fd, &ch, 1); } while (r < 0 && errno == EINTR);
+  if (fl >= 0 && !(fl & O_NONBLOCK)) fcntl(fd, F_SETFL, fl);
+  if (r == 0) return 1;
+  clearerr(fp);
+  f->fifo_eof = 0;
+  if (r == 1) ungetc((unsigned char)ch, fp);
+  return 0;
+}
+#endif
+
 /* The read buffer of a handle with own_buf set: rbuf[rpos, rlen) are the
    bytes read from the descriptor and not yet taken. It starts at
    SP_IO_RBUF_MIN bytes, grows only for an ungetc in front of a full one, and
@@ -928,11 +991,20 @@ static void sp_io_wait_readable_probe(sp_File *f, int probe) {SP_GC_ROOT(f);
   if (f->own_buf) return;
   if (!sp_io_parkable(f)) return;
   FILE *fp = sp_io_use(f);
-  size_t buffered = sp_io_pending(f);
   int fd = fileno(fp);
+#ifdef __APPLE__
+  int at_end = !f->is_sock && sp_io_fifo_at_end(f, fp, fd);
+#endif
+  size_t buffered = sp_io_pending(f);
   sp_io_unuse(f);
+#ifdef __APPLE__
+  if (at_end) return;
+#endif
   if (buffered > 0) return;
   if (probe && f->is_sock && sp_sock_read_answers_now(fd)) return;
+#ifdef __APPLE__
+  if (f->is_sock || !sp_io_park_named_fifo(fd, &f->closed))
+#endif
   sp_io_park_fd_readable(fd, &f->closed);
   /* woken by a close from another thread: the handle is gone, and a read
      would touch a descriptor that is closed or already someone else's */
@@ -2489,6 +2561,7 @@ static ssize_t sp_io_read_chunk_timed(sp_File *f, char *buf, size_t count) {
     int error = errno;
     sp_io_nb_end(f, saved);
     sp_io_unuse(f);
+    if (got == 0) f->fifo_eof = 1;
     if (got >= 0) return got;
     if (error == EINTR || error == EAGAIN || error == EWOULDBLOCK) continue;
     errno = error;
@@ -2602,7 +2675,7 @@ const char *sp_File_readpartial_or_nil(sp_File *f, sp_int n) {SP_GC_ROOT(f);
   { int e = errno; sp_io_unuse(f); errno = e; }
   if (fe) sp_io_raise_read_error(f, fe, 0);
   if (got < 0) sp_file_raise_errno("read", "");
-  if (got == 0) return NULL;
+  if (got == 0) { f->fifo_eof = 1; return NULL; }
   r[got] = 0;
   sp_str_set_len(r, (size_t)got);
   sp_str_mark_binary(r);   /* readpartial / sysread answer ASCII-8BIT, as CRuby */
@@ -2701,6 +2774,7 @@ const char *sp_sock_read_nb(sp_File *f, sp_int len, sp_bool exc, sp_bool is_recv
     do { n = SP_SIG_BLOCKING(read(fileno(fp), buf, (size_t)len)); } while (n < 0 && errno == EINTR);
     int e = errno;
     sp_io_nb_end(f, saved);
+    if (n == 0) f->fifo_eof = 1;
     errno = e;
   }
   { int e = errno; sp_io_unuse(f); errno = e; }
@@ -3201,6 +3275,7 @@ sp_File *sp_File_reopen_io(sp_File *f, sp_File *other) {SP_GC_ROOT(f);SP_GC_ROOT
     sp_file_raise_errno("reopen", other->path ? other->path : "");
   sp_io_stdout_rebuffer(f, was_tty);
   if (f->own_buf || other->own_buf) sp_io_own_buf_reopened(f);
+  f->fifo_eof = 0;
   /* the other's Strings, which it may not outlive: a standard stream
      keeps them with no scan to mark them (sp_io_mark_static_stream) */
   sp_io_static_stream_rooted(f);
@@ -3549,6 +3624,7 @@ sp_File *sp_File_reopen(sp_File *f, const char *path, const char *mode) {SP_GC_R
   SP_ATOMIC_STORE(&f->closed, 0, __ATOMIC_RELAXED);
   if (reserved) SP_ATOMIC_STORE(&f->uses, 0, __ATOMIC_RELEASE);
   if (f->own_buf) sp_io_own_buf_reopened(f);
+  f->fifo_eof = 0;
   /* the path and the mode are the handle's now: a standard stream keeps
      them with no scan to mark them (sp_io_mark_static_stream) */
   sp_io_static_stream_rooted(f);

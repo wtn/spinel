@@ -1,0 +1,11 @@
+["a\n", "b", nil, true]
+:writer_done
+["abc", "d", nil, ""]
+:writer_done
+["abcd", nil, ""]
+:writer_done
+["ab", "cd", EOFError, "", nil]
+:writer_done
+[["a\n", "b\n", "c"], "", nil, []]
+:writer_done
+end
