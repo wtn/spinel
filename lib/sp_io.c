@@ -55,6 +55,8 @@
 #include <poll.h>    /* POLLIN for the socket read park */
 #include <time.h>
 
+SP_TLS int sp_io_epipe_raises;
+
 /* Per-call "do not block" for send(2). Linux honours it; Darwin and the BSDs
    accept the flag and sleep anyway once the send buffer is full, which is why
    sp_sock_room below exists. Where the flag is missing entirely it is 0 and
@@ -1021,14 +1023,14 @@ static sp_int sp_sock_write(sp_File *f, const char *s, size_t n) {
          the descriptor writable and the park really parks. */
       if (room == 0) continue;
       if (room > 0 && (size_t)room < want) want = (size_t)room;
-      put = send(fd, s + off, want, SP_MSG_DONTWAIT);
+      put = SP_IO_EPIPE_RAISES(fd, send(fd, s + off, want, SP_MSG_DONTWAIT));
     }
     else {
       /* A blocking pipe that polls writable takes PIPE_BUF bytes without
          sleeping; more than that can sleep in the kernel holding the
          worker while the reader waits for it. */
       if (!nb && want > PIPE_BUF) want = PIPE_BUF;
-      put = write(fd, s + off, want);
+      put = SP_IO_EPIPE_RAISES(fd, write(fd, s + off, want));
     }
     if (put < 0) {
       if (errno == EINTR) continue;
@@ -1063,9 +1065,9 @@ static sp_int sp_io_write_raw(sp_File *f, const char *s, size_t n) {
   /* Flush whatever stdio still holds: a previous buffered write would
      otherwise land after this direct write and reorder the bytes. A
      flush failure is the same error path as a write failure. */
-  if (fflush(f->fp) != 0) sp_file_raise_errno("write", "file");
+  if (SP_IO_FLUSH_CHECKED(fd, f->fp) != 0) sp_file_raise_errno("write", "file");
   while (off < n) {
-    ssize_t put = write(fd, s + off, n - off);
+    ssize_t put = SP_IO_EPIPE_RAISES(fd, write(fd, s + off, n - off));
     if (put < 0) {
       if (errno == EINTR) continue;
       sp_file_raise_errno("write", "file");
@@ -2235,9 +2237,11 @@ sp_int sp_sock_send(sp_File *f, const char *data, sp_int len, sp_int flags, cons
     /* a non-blocking descriptor: a send that finds the buffer full waits for
        room, as CRuby's does, instead of answering EAGAIN */
     double deadline = sp_io_deadline(f);
+    /* (converted first: a RangeError raised inside the guard left it set) */
+    int iflags = (int)sp_sock_int_arg(flags);
     for (;;) {
       int fd = fileno(sp_io_use(f));
-      ssize_t put = send(fd, data, (size_t)len, sp_sock_int_arg(flags) | SP_MSG_DONTWAIT);
+      ssize_t put = SP_IO_EPIPE_RAISES(fd, send(fd, data, (size_t)len, iflags | SP_MSG_DONTWAIT));
       int e = errno;
       sp_io_unuse(f);
       if (put >= 0) return (sp_int)put;
@@ -2795,7 +2799,8 @@ const char *sp_sock_read_nb(sp_File *f, sp_int len, sp_bool exc, sp_bool is_recv
 static sp_oint sp_sock_write_nb_len(sp_File *f, const char *data, size_t len, sp_bool exc) {SP_GC_ROOT(f);SP_GC_ROOT_STR(data);
   ssize_t n;
   int saved = sp_io_nb_begin(f);
-  do { n = write(fileno(f->fp), data ? data : "", len); } while (n < 0 && errno == EINTR);
+  int fd = fileno(f->fp);
+  do { n = SP_IO_EPIPE_RAISES(fd, write(fd, data ? data : "", len)); } while (n < 0 && errno == EINTR);
   int we = errno;
   sp_io_nb_end(f, saved);
   errno = we;

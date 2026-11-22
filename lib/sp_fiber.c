@@ -651,10 +651,65 @@ static void sp_main_stack_entry(void) {
   sp_ctx_swap(&sp_main_stack_ctx, &sp_main_stack_caller);
 }
 
+#if defined(SIGPIPE) && !defined(_WIN32) && !defined(__wasi__)
+/* A SIGPIPE from a write the runtime checks (SP_IO_EPIPE_RAISES) does
+   nothing, and the call fails with EPIPE. Others end the program as the
+   default action does: stdio's writes to STDOUT go unchecked, and CRuby
+   dies by SIGPIPE on an unrescued EPIPE from STDOUT. */
+extern SP_TLS int sp_io_epipe_raises;   /* sp_io.h */
+static void sp_sigpipe_nothing(int no) {
+  if (sp_io_epipe_raises) return;
+  signal(no, SIG_DFL);
+  raise(no);
+}
+/* Installs the SIGPIPE handler (CRuby's sig_do_nothing): a write to a
+   closed pipe or socket raises Errno::EPIPE. exec resets a handler to
+   the default and keeps SIG_IGN, so a child has SIGPIPE at its default.
+   Also what trap("PIPE", "DEFAULT") installs. */
+int sp_sigpipe_is_quiet;
+void sp_sigpipe_quiet(void) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_handler = sp_sigpipe_nothing;
+  sa.sa_flags = SA_RESTART;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGPIPE, &sa, NULL);
+  /* (set once the handler is in) */
+  __atomic_store_n(&sp_sigpipe_is_quiet, 1, __ATOMIC_SEQ_CST);
+}
+#else
+int sp_sigpipe_is_quiet;
+void sp_sigpipe_quiet(void) {}
+#endif
+#ifdef __APPLE__
+/* F_SETNOSIGPIPE belongs to the open file, shared by the threads that
+   write a descriptor, so it is set when the first checked call on the
+   descriptor begins and cleared when the last one ends. A descriptor past
+   the table keeps it set. */
+#include <fcntl.h>
+#define SP_NOSIGPIPE_FDS 1024
+static int sp_nosigpipe_calls[SP_NOSIGPIPE_FDS];
+static char sp_nosigpipe_lock;
+void sp_io_nosigpipe(int fd, int on) {
+  if (fd >= SP_NOSIGPIPE_FDS) { if (on) fcntl(fd, F_SETNOSIGPIPE, 1); return; }
+  while (__atomic_test_and_set(&sp_nosigpipe_lock, __ATOMIC_ACQUIRE)) {}
+  int n = sp_nosigpipe_calls[fd] += on ? 1 : -1;
+  if (n == (on ? 1 : 0)) fcntl(fd, F_SETNOSIGPIPE, on);
+  __atomic_clear(&sp_nosigpipe_lock, __ATOMIC_RELEASE);
+}
+#endif
+
 /* Run `body` on a stack of this compiler's choosing. If one cannot be had --
    any size, down to the floor -- run it where we are: a program must not fail
    to start because it could not reserve a big stack. */
 void sp_main_stack_run(void (*body)(void)) {
+#if defined(SIGPIPE) && !defined(_WIN32) && !defined(__wasi__)
+  /* (a SIGPIPE the parent left ignored stays ignored, as in CRuby) */
+  {
+    struct sigaction sa;
+    if (sigaction(SIGPIPE, NULL, &sa) == 0 && sa.sa_handler == SIG_DFL) sp_sigpipe_quiet();
+  }
+#endif
   /* STDOUT on a terminal is written through, as CRuby's is (its FMODE_TTY):
      what a write call wrote is on the terminal when the call returns, though
      STDOUT.sync answers false. stdio's line buffering kept a partial line

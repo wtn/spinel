@@ -17,6 +17,51 @@
 #include "sp_types.h"   /* sp_int, sp_bool */
 #include "sp_array.h"   /* sp_IntArray (for #winsize) */
 
+/* Set while the runtime makes a write(2) or send(2) whose EPIPE it raises,
+   to a descriptor other than STDOUT or STDERR, while SIGPIPE has the quiet
+   handler (sp_sigpipe_is_quiet, sp_sigpipe_quiet): the handler returns
+   then, and other SIGPIPEs end the program. Linux sends the SIGPIPE to the
+   writing thread before the call returns. Darwin sends it to the process,
+   so there the descriptor is marked to send none while a checked call on
+   it runs (a descriptor a child inherits keeps its SIGPIPE). */
+extern SP_TLS int sp_io_epipe_raises;
+extern int sp_sigpipe_is_quiet;
+#ifdef __APPLE__
+void sp_io_nosigpipe(int fd, int on);   /* sp_fiber.c */
+# define SP_IO_NOSIGPIPE(fd, on) sp_io_nosigpipe((fd), (on))
+#else
+# define SP_IO_NOSIGPIPE(fd, on) ((void)0)
+#endif
+#define SP_IO_EPIPE_RAISES(fd, call) ({ \
+    int sp_epd_ = (fd), sp_epf_ = sp_epd_ > 2 && __atomic_load_n(&sp_sigpipe_is_quiet, __ATOMIC_SEQ_CST); \
+    if (sp_epf_) { SP_IO_NOSIGPIPE(sp_epd_, 1); sp_io_epipe_raises = 1; } \
+    ssize_t sp_epr_ = (call); \
+    if (sp_epf_) { int sp_epe_ = errno; sp_io_epipe_raises = 0; SP_IO_NOSIGPIPE(sp_epd_, 0); errno = sp_epe_; } \
+    sp_epr_; })
+/* A flush ahead of a direct write that failed with EPIPE drops what stdio
+   held: no reader takes it, and the flush at exit would write it again
+   outside the guard. */
+#if defined(__APPLE__) || defined(__FreeBSD__)
+# define SP_IO_PURGE(fp) ((void)fpurge(fp))
+#elif defined(__GLIBC__)
+# include <stdio_ext.h>
+# define SP_IO_PURGE(fp) __fpurge(fp)
+#else
+# define SP_IO_PURGE(fp) ((void)(fp))
+#endif
+/* (the stream stays locked from the flush to the purge, so a buffered
+   write another thread makes in between is not dropped; the lock is
+   recursive, and fflush takes it again) */
+#define SP_IO_FLUSH_CHECKED(fd, fp) ({ \
+    FILE *sp_efp_ = (fp); \
+    flockfile(sp_efp_); \
+    int sp_efr_ = (int)SP_IO_EPIPE_RAISES((fd), fflush(sp_efp_)); \
+    int sp_efe_ = errno; \
+    if (sp_efr_ != 0 && sp_efe_ == EPIPE) SP_IO_PURGE(sp_efp_); \
+    funlockfile(sp_efp_); \
+    errno = sp_efe_; \
+    sp_efr_; })
+
 /* File.fnmatch's flags: CRuby's File::FNM_* values, which codegen emits by
    these names and sp_file_fnmatch (lib/sp_cold.c) reads */
 #define SP_FNM_NOESCAPE 1

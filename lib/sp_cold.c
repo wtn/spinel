@@ -5031,6 +5031,11 @@ sp_RbVal sp_signal_trap(sp_RbVal sig, sp_RbVal handler) {SP_GC_ROOT_RBVAL(sig);S
       sigemptyset(&sa.sa_mask);
       sa.sa_flags = SA_RESTART;
       sigaction(no, &sa, NULL);
+#ifdef SIGPIPE
+      /* (cleared once the Proc's handler is in: the guard, sp_io.h, leaves
+         SIGPIPE to it) */
+      if (no == SIGPIPE) __atomic_store_n(&sp_sigpipe_is_quiet, 0, __ATOMIC_SEQ_CST);
+#endif
     }
   }
   else {
@@ -5049,6 +5054,11 @@ sp_RbVal sp_signal_trap(sp_RbVal sig, sp_RbVal handler) {SP_GC_ROOT_RBVAL(sig);S
                       : ignore ? (&("\xff" "IGNORE")[1])
                       : sysdef ? (&("\xff" "SYSTEM_DEFAULT")[1])
                       : dflt;
+#ifdef SIGPIPE
+    /* PIPE's DEFAULT is CRuby's do-nothing handler; SYSTEM_DEFAULT is SIG_DFL */
+    if (no == SIGPIPE && !ignore && !sysdef) sp_sigpipe_quiet();
+    else
+#endif
     if (no != 0) {
       /* DEFAULT on SIGINT or SIGTERM puts back the handler that raises
          Interrupt or SignalException, as an untrapped signal has */
@@ -5059,6 +5069,9 @@ sp_RbVal sp_signal_trap(sp_RbVal sig, sp_RbVal handler) {SP_GC_ROOT_RBVAL(sig);S
         sigaction(no, &sa, NULL);
       }
       else signal(no, ignore ? SIG_IGN : SIG_DFL);
+#ifdef SIGPIPE
+      if (no == SIGPIPE) __atomic_store_n(&sp_sigpipe_is_quiet, 0, __ATOMIC_SEQ_CST);
+#endif
     }
   }
   return prev;

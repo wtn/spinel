@@ -1071,10 +1071,10 @@ sp_int sp_IOBuffer_write_io(sp_IOBuffer *b, sp_RbVal io, sp_int length, sp_int o
   uint8_t *at = iob_io_span(b, &length, offset, 0);
   if (length == 0) return 0;
   /* a buffered write still in stdio would land after this one */
-  if (fflush(f->fp) != 0) return -(sp_int)errno;
   int fd = fileno(f->fp);
+  if (SP_IO_FLUSH_CHECKED(fd, f->fp) != 0) return -(sp_int)errno;
   for (;;) {
-    ssize_t n = write(fd, at, (size_t)length);
+    ssize_t n = SP_IO_EPIPE_RAISES(fd, write(fd, at, (size_t)length));
     if (n >= 0) return (sp_int)n;
     if (errno == EINTR) continue;
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -1101,7 +1101,7 @@ sp_int sp_IOBuffer_pwrite_io(sp_IOBuffer *b, sp_RbVal io, sp_int from, sp_int le
   if (from < 0) return -(sp_int)EINVAL;   /* the syscall's answer, as CRuby hands it on */
   uint8_t *at = iob_io_span(b, &length, offset, 0);
   if (length == 0) return 0;
-  if (fflush(f->fp) != 0) return -(sp_int)errno;
+  if (SP_IO_FLUSH_CHECKED(fileno(f->fp), f->fp) != 0) return -(sp_int)errno;
   ssize_t n;
   do { n = pwrite(fileno(f->fp), at, (size_t)length, (off_t)from); } while (n < 0 && errno == EINTR);
   return n < 0 ? -(sp_int)errno : (sp_int)n;
