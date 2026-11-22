@@ -538,9 +538,16 @@ The runtime is POSIX-flavoured and targets POSIX platforms:
 | Windows | Use [WSL](https://learn.microsoft.com/windows/wsl/) (builds/runs as Linux) | gcc, clang |
 | Windows, native (x64) | Community-maintained, best effort; may lag behind master; see [docs/windows.md](docs/windows.md) | MinGW-w64 gcc (UCRT) |
 
-Every PR runs `ubuntu-latest / gcc`, `ubuntu-latest / clang`, and
-`macos-latest / clang` jobs end-to-end (parser build, codegen build,
-full test + benchmark suites). WSL is the dependable way to run Spinel
+A pull request runs one job of the CI workflow, `ubuntu-latest / clang`:
+the parser build, the codegen build and the whole test corpus at -O0. A
+pull request that changes only `docs/` or top-level Markdown files skips
+the CI workflow. A push to master runs `ubuntu-latest / gcc`,
+`ubuntu-latest / clang` and `macos-latest / clang`, each on a rotating
+slice of the corpus (the macOS job adds the tests that
+`tools/os_sensitive.re` matches and the package tests, and the gcc job
+adds the benchmarks and optcarrot), along with the `clang -m32`,
+`--int-overflow=wrap`, `--int-overflow=promote` and
+`wasm32-wasi` jobs. WSL is the dependable way to run Spinel
 on Windows: it builds and runs there as a native Linux toolchain. A native
 build with MinGW-w64 gcc (as MSYS2 and RubyInstaller's Devkit ship it) is
 community-maintained and best effort: the runtime is written against POSIX,
