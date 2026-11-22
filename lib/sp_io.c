@@ -660,7 +660,10 @@ SP_NORETURN static void sp_sock_raise_errno(const char *syscall);
 /* sock_call names the system call of a socket read (#recv), NULL for a read */
 SP_NORETURN static void sp_io_raise_read_errno(const char *sock_call) {
   if (sock_call) sp_sock_raise_errno(sock_call);
-  sp_file_raise_errno("read", "");
+  /* (a handle with its own buffer is a socket or a pipe, which has no path:
+     the bare strerror, as rb_syserr_fail_path gives for a nil path) */
+  int e = errno;
+  sp_raise_cls(sp_errno_class_name(e), strerror(e));
 }
 
 /* Bytes in rbuf: 1, or 0 at the end of the stream. When rbuf is empty, one
@@ -2433,7 +2436,9 @@ sp_File *sp_sock_accept_nb(sp_File *f, sp_bool exc) {SP_GC_ROOT(f);
    the OS worker, which never reaches a safepoint, so the next stop-the-world
    collection waited on it forever and one green thread idle in readpartial
    on a quiet socket froze every other thread's allocation (#4528). */
-const char *sp_File_readpartial_or_nil(sp_File *f, sp_int n) {SP_GC_ROOT(f);
+/* func is the C function CRuby raises the read's Errno from: io_getpartial
+   for readpartial, rb_io_sysread for sysread */
+static const char *sp_io_partial(sp_File *f, sp_int n, const char *func) {SP_GC_ROOT(f);
   sp_io_check_readable(f);
   if (n < 0) sp_raise_cls("EOFError", "end of file reached");
   if (n == 0) return sp_str_empty_binary();
@@ -2453,7 +2458,7 @@ const char *sp_File_readpartial_or_nil(sp_File *f, sp_int n) {SP_GC_ROOT(f);
     do { got = SP_SIG_BLOCKING(read(fileno(fp), r, (size_t)n)); } while (got < 0 && errno == EINTR);
   }
   { int e = errno; sp_io_unuse(f); errno = e; }
-  if (got < 0) sp_file_raise_errno("read", "");
+  if (got < 0) sp_io_raise_path_errno(f, func);
   if (got == 0) return NULL;
   r[got] = 0;
   sp_str_set_len(r, (size_t)got);
@@ -2470,7 +2475,9 @@ const char *sp_File_readpartial_or_nil(sp_File *f, sp_int n) {SP_GC_ROOT(f);
    String as before and copies it into buf. NULL at the end of the stream,
    with buf emptied; else buf's bytes. The caller has checked that buf can
    change. */
-const char *sp_File_readpartial_into(sp_File *f, sp_int n, sp_String *buf) {SP_GC_ROOT(f); SP_GC_ROOT(buf);
+const char *sp_File_readpartial_or_nil(sp_File *f, sp_int n) { return sp_io_partial(f, n, "io_getpartial"); }
+const char *sp_File_sysread_or_nil(sp_File *f, sp_int n) { return sp_io_partial(f, n, "rb_io_sysread"); }
+static const char *sp_io_partial_into(sp_File *f, sp_int n, sp_String *buf, const char *func) {SP_GC_ROOT(f); SP_GC_ROOT(buf);
   sp_io_check_readable(f);
   if (n < 0) sp_raise_cls("EOFError", "end of file reached");
   if (n > 0 && f->own_buf && ((size_t)n <= SP_IO_RBUF_MIN || sp_io_pending(f))) {
@@ -2491,15 +2498,22 @@ const char *sp_File_readpartial_into(sp_File *f, sp_int n, sp_String *buf) {SP_G
     sp_fd_publish(buf);
     return NULL;
   }
-  const char *r = n == 0 ? sp_str_empty_binary() : sp_File_readpartial_or_nil(f, n);
+  const char *r = n == 0 ? sp_str_empty_binary() : sp_io_partial(f, n, func);
   SP_GC_ROOT_STR(r);
   sp_String_set_bin(buf, r ? r : sp_str_empty_binary());
   return r ? buf->data : NULL;
 }
+const char *sp_File_readpartial_into(sp_File *f, sp_int n, sp_String *buf) { return sp_io_partial_into(f, n, buf, "io_getpartial"); }
+const char *sp_File_sysread_into(sp_File *f, sp_int n, sp_String *buf) { return sp_io_partial_into(f, n, buf, "rb_io_sysread"); }
 
 /* readpartial / sysread: EOFError at the end of the stream. */
 const char *sp_File_readpartial(sp_File *f, sp_int n) {
   const char *r = sp_File_readpartial_or_nil(f, n);
+  if (!r) sp_raise_cls("EOFError", "end of file reached");
+  return r;
+}
+const char *sp_File_sysread(sp_File *f, sp_int n) {
+  const char *r = sp_File_sysread_or_nil(f, n);
   if (!r) sp_raise_cls("EOFError", "end of file reached");
   return r;
 }
@@ -2513,7 +2527,7 @@ const char *sp_File_readpartial_checked(sp_File *f, sp_int n) {SP_GC_ROOT(f);
 
 const char *sp_File_sysread_checked(sp_File *f, sp_int n) {SP_GC_ROOT(f);
   if (n < 0) sp_raise_cls("ArgumentError", "negative string size (or size too big)");
-  return sp_File_readpartial(f, n);
+  return sp_File_sysread(f, n);
 }
 
 /* rb_syserr_fail_path in CRuby's io.c: "<strerror> @ <func> - <path>" for

@@ -1347,6 +1347,10 @@ const char *sp_File_sysread_checked(sp_File *f, sp_int n);
 /* The same read answering NULL at EOF instead of raising: a boxed output
    buffer is emptied before the EOFError (the codegen's output-buffer path). */
 const char *sp_File_readpartial_or_nil(sp_File *f, sp_int n);
+/* sysread's: the same reads, raising an Errno as rb_io_sysread does */
+const char *sp_File_sysread(sp_File *f, sp_int n);
+const char *sp_File_sysread_or_nil(sp_File *f, sp_int n);
+const char *sp_File_sysread_into(sp_File *f, sp_int n, sp_String *buf);
 /* The same read into a shared String handle's own room: NULL at EOF, with
    the handle emptied; else the handle's bytes. */
 const char *sp_File_readpartial_into(sp_File *f, sp_int n, sp_String *buf);
@@ -12922,9 +12926,9 @@ static sp_String *sp_io_read_buffer(sp_File *f, sp_int n, sp_RbVal buffer,
     if (out && rest) sp_String_set_bin_enc(out, bytes ? bytes : sp_str_empty);
     else if (out) sp_String_set_bin(out, bytes ? bytes : sp_str_empty);
   } else if (out) {
-    bytes = sp_File_readpartial_into(f, n, out);
+    bytes = sysread ? sp_File_sysread_into(f, n, out) : sp_File_readpartial_into(f, n, out);
   } else {
-    bytes = sp_File_readpartial_or_nil(f, n);
+    bytes = sysread ? sp_File_sysread_or_nil(f, n) : sp_File_readpartial_or_nil(f, n);
   }
   if (!bytes) {
     if (!read) sp_raise_cls("EOFError", "end of file reached");

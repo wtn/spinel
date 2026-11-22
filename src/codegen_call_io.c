@@ -295,6 +295,12 @@ static void emit_io_read_nonblock_buffer(Compiler *c, int id, int handle, Buf *b
 const char *io_readpartial_entry(const char *name) {
   return sp_streq(name, "readpartial") ? "sp_File_readpartial_checked" : "sp_File_sysread_checked";
 }
+/* For a readpartial or sysread call with an output buffer, the name of the
+   runtime function the emitted C calls. That runtime function returns NULL
+   at EOF, and the emitted C empties the buffer and raises EOFError. */
+const char *io_partial_or_nil_entry(const char *name) {
+  return sp_streq(name, "sysread") ? "sp_File_sysread_or_nil" : "sp_File_readpartial_or_nil";
+}
 
 /* The runtime entry pread(len, offset) reads through: the two-argument form
    checks its length first (ArgumentError for a negative one, as CRuby);
@@ -1458,8 +1464,10 @@ int emit_call_poly_io_arms(Compiler *c, int id, Buf *b, const NodeTable *nt, con
           /* a frozen literal's handle carries the freeze in its bytes */
           buf_printf(b, "if (_t%d) { if (sp_String_is_frozen(_t%d)) sp_raise_frozen_str(_t%d->data); "
                         "sp_str_check_mutable(_t%d->data); } ", th, th, th, th);
-          buf_printf(b, "const char *_t%d = _t%d ? sp_File_readpartial_into(_t%d, _t%d, _t%d)"
-                        " : sp_File_readpartial_or_nil(_t%d, _t%d); ", tsp, th, tio2, tn, th, tio2, tn);
+          int sr = sp_streq(name, "sysread");
+          buf_printf(b, "const char *_t%d = _t%d ? %s(_t%d, _t%d, _t%d) : %s(_t%d, _t%d); ", tsp, th,
+                     sr ? "sp_File_sysread_into" : "sp_File_readpartial_into", tio2, tn, th,
+                     sr ? "sp_File_sysread_or_nil" : "sp_File_readpartial_or_nil", tio2, tn);
           buf_printf(b, "if (!_t%d) sp_raise_cls(\"EOFError\", \"end of file reached\"); _t%d; })", tsp, tsp);
         }
         else {
@@ -1472,7 +1480,7 @@ int emit_call_poly_io_arms(Compiler *c, int id, Buf *b, const NodeTable *nt, con
             buf_puts(b, "sp_str_check_mutable("); emit_expr(c, argv[1], b); buf_puts(b, "); ");
             buf_printf(b, "const char *_t%d = ", tsp);
           }
-          buf_printf(b, "%s(_t%d, ", argc >= 2 ? "sp_File_readpartial_or_nil" : io_readpartial_entry(name), tio2);
+          buf_printf(b, "%s(_t%d, ", argc >= 2 ? io_partial_or_nil_entry(name) : io_readpartial_entry(name), tio2);
           emit_int_expr(c, argv[0], b);
           buf_puts(b, ")");
           if (argc >= 2) {
@@ -1944,7 +1952,7 @@ int emit_call_io_arms(Compiler *c, int id, Buf *b, const NodeTable *nt, const ch
         buf_puts(b, "({ sp_str_check_mutable("); emit_expr(c, argv[1], b); buf_puts(b, "); ");
         buf_printf(b, "const char *_t%d = ", tsr);
       }
-      buf_printf(b, "%s(%s, ", argc >= 2 ? "sp_File_readpartial_or_nil" : io_readpartial_entry(name), r); emit_int_expr(c, argv[0], b); buf_puts(b, ")");
+      buf_printf(b, "%s(%s, ", argc >= 2 ? io_partial_or_nil_entry(name) : io_readpartial_entry(name), r); emit_int_expr(c, argv[0], b); buf_puts(b, ")");
       if (argc >= 2) {
         { Buf hr; memset(&hr, 0, sizeof hr);
           /* a buffer that is also appended to is a mutable String handle:

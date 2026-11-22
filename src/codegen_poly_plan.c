@@ -4142,15 +4142,17 @@ void emit_poly_cases_n(Compiler *c, int id, const char *name, const PolySpecials
       buf_printf(b, "sp_String *_t%d = %s; SP_GC_ROOT(_t%d); ", th, hr.p, th);
       buf_printf(b, "if (_t%d) { if (sp_String_is_frozen(_t%d)) sp_raise_frozen_str(_t%d->data); "
                     "sp_str_check_mutable(_t%d->data); } ", th, th, th, th);
-      buf_printf(b, "const char *_t%d = _t%d ? sp_File_readpartial_into((sp_File *)_t%d.v.p, _t%d, _t%d)"
-                    " : sp_File_readpartial_or_nil((sp_File *)_t%d.v.p, _t%d); ", trp, th, tv, tn, th, tv, tn);
+      int sr = sp_streq(name, "sysread");
+      buf_printf(b, "const char *_t%d = _t%d ? %s((sp_File *)_t%d.v.p, _t%d, _t%d) : %s((sp_File *)_t%d.v.p, _t%d); ",
+                 trp, th, sr ? "sp_File_sysread_into" : "sp_File_readpartial_into", tv, tn, th,
+                 sr ? "sp_File_sysread_or_nil" : "sp_File_readpartial_or_nil", tv, tn);
       buf_printf(b, "if (!_t%d) sp_raise_cls(\"EOFError\", \"end of file reached\"); ", trp);
     }
     else {
       /* (readpartial checks its length as the one-argument form does;
          sysread with a buffer is CRuby's Errno::EFAULT, which this is not) */
       buf_printf(b, " case SP_BUILTIN_IO: { const char *_t%d = %s((sp_File *)_t%d.v.p, ", trp,
-                 sp_streq(name, "readpartial") ? "sp_File_readpartial_checked" : "sp_File_readpartial", tv);
+                 sp_streq(name, "readpartial") ? "sp_File_readpartial_checked" : "sp_File_sysread", tv);
       if (atmp_ty[0] == TY_POLY) buf_printf(b, "sp_poly_arg_int_chk(_t%d)", atmp[0]);
       else buf_printf(b, "(sp_int)_t%d", atmp[0]);
       buf_puts(b, "); ");
