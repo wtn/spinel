@@ -12673,15 +12673,31 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
     if (init) {
       /* the class a constant receiver names: a call of another class's
          initialize is none of ours; a receiver that is no constant (a
-         variable, an implicit self) or a `new` of the program's own cannot
-         be followed */
+         variable) or a `new` of the program's own cannot be followed */
       int r = nt_ref(nt, u, "receiver");
-      if (r < 0 || (nt_kind(nt, r) != NK_ConstantReadNode && nt_kind(nt, r) != NK_ConstantPathNode)) return 0;
-      const char *rn = nt_str(nt, r, "name");
-      int rc = rn ? const_node_class_index(c, r) : -1;
-      if (rc < 0) { if (rn && is_builtin_class_name(rn)) continue; return 0; }
-      if (cplan_user_new(c, u, rc) >= 0) return 0;
-      if (cplan_hook_target(c, u, rc, "initialize", NULL) != (int)(s - c->scopes)) continue;
+      if (r < 0) {
+        /* a bare `new` in a class method builds the method's class or a
+           class below it (`def self.[](*a) = new(a)`): ours where one of
+           them runs this initialize */
+        Scope *us = comp_scope_of(c, u);
+        int ours = 0;
+        if (ie_rebound_node(c, u) || !us || !us->is_cmethod || us->def_node < 0 || us->class_id < 0) return 0;
+        for (int k = 0; k < c->nclasses; k++) {
+          if (k != us->class_id && !is_descendant(c, k, us->class_id)) continue;
+          if (cplan_user_new(c, u, k) >= 0) return 0;
+          int ht = cplan_hook_target(c, u, k, "initialize", NULL);
+          ours |= ht >= 0 && (ht == (int)(s - c->scopes) || c->scopes[ht].def_node == s->def_node);
+        }
+        if (!ours) continue;
+      }
+      else {
+        if (nt_kind(nt, r) != NK_ConstantReadNode && nt_kind(nt, r) != NK_ConstantPathNode) return 0;
+        const char *rn = nt_str(nt, r, "name");
+        int rc = rn ? const_node_class_index(c, r) : -1;
+        if (rc < 0) { if (rn && is_builtin_class_name(rn)) continue; return 0; }
+        if (cplan_user_new(c, u, rc) >= 0) return 0;
+        if (cplan_hook_target(c, u, rc, "initialize", NULL) != (int)(s - c->scopes)) continue;
+      }
     }
     if (!pn) {
       int r = nt_ref(nt, u, "receiver");
