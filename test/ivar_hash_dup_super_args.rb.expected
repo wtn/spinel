@@ -1,0 +1,15 @@
+{"note" => "joined", "ack-nonce" => 7}
+{"pong-nonce" => 3, "ack-nonce" => 7}
+{"ping-nonce" => 4, "ack-nonce" => 7}
+{"note" => "left", "ack-nonce" => 8}
+{"pong-nonce" => 5, "ack-nonce" => 8}
+{"note" => "kept", "ack-nonce" => 9}
+{"pong-nonce" => 6, "ack-nonce" => 9}
+1
+{"ping-nonce" => 7, "ack-nonce" => 9}
+{"pong" => "six", "ack-nonce" => 9}
+{"pong-nonce" => 8, "ack-nonce" => 9}
+{"ping-nonce" => 9, "ack-nonce" => 9}
+{"pong" => "six", "ack-nonce" => 10}
+{"ping-nonce" => 11, "ack-nonce" => 10}
+{"x" => "y", "ack-nonce" => 10}
