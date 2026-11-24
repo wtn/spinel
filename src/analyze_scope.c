@@ -12311,9 +12311,10 @@ int poly_ivar_set_class(Compiler *c, int k) {
    PX_BLOCK_PARAM a literal block's required parameter (aux: the call it
    is the block of), PX_SYMBOL a Symbol or String literal by its text,
    PX_BLOCK_WRITE a local write inside a block, PX_SUPER a `super` by its
-   method's name. A node is in one list at most, once, so one `next`
+   method's name, PX_CONST_WRITE a constant write or target by the
+   constant's name. A node is in one list at most, once, so one `next`
    serves. */
-enum { PX_BLOCK_PARAM, PX_SYMBOL, PX_BLOCK_WRITE, PX_SUPER, PX_N };
+enum { PX_BLOCK_PARAM, PX_SYMBOL, PX_BLOCK_WRITE, PX_SUPER, PX_CONST_WRITE, PX_N };
 typedef struct PivsFacts {
   struct { int ok; char *set; int *cls, ncls; int *hash, nhash, typed, sweep, builtin;
            int walked, has_class; char *cvals; } *memo;
@@ -12478,6 +12479,16 @@ static PivsFacts *pivs_ix_ready(Compiler *c) {
           if (us) pivs_ix_add(f, PX_SUPER, us->name, n, -1);
           break;
         }
+        case NK_ConstantWriteNode: case NK_ConstantOrWriteNode: case NK_ConstantAndWriteNode:
+        case NK_ConstantOperatorWriteNode: case NK_ConstantTargetNode:
+          pivs_ix_add(f, PX_CONST_WRITE, nt_str(nt, n, "name"), n, -1);
+          break;
+        case NK_ConstantPathWriteNode: case NK_ConstantPathOrWriteNode: case NK_ConstantPathAndWriteNode:
+        case NK_ConstantPathOperatorWriteNode: case NK_ConstantPathTargetNode: {
+          int t = nt_ref(nt, n, "target");
+          pivs_ix_add(f, PX_CONST_WRITE, nt_str(nt, t >= 0 ? t : n, "name"), n, -1);
+          break;
+        }
         default: break;
       }
     }
@@ -12601,6 +12612,20 @@ static int pivs_local_writes_ok(Compiler *c, int si, const char *vn) {
     if (nt_int(nt, w, "depth", 0) > 0 && sp_streq(nt_str(nt, w, "name"), vn)) return 0;
   return 1;
 }
+/* Does the program give constant `nm` no value: no write or target of the
+   name, no Symbol or String of it (`const_set(:NM, v)`, `autoload`), and no
+   `const_set` of a computed name? A read of it raises NameError. */
+static int pivs_const_unset(Compiler *c, const char *nm) {
+  const NodeTable *nt = c->nt;
+  if (pivs_ix_first(c, PX_CONST_WRITE, nm) >= 0 || pivs_ix_first(c, PX_SYMBOL, nm) >= 0) return 0;
+  for (int u = an_calls_named_first(c, "const_set"); u >= 0; u = an_calls_named_next(u)) {
+    int a = nt_ref(nt, u, "arguments"), ac = 0;
+    const int *av = a >= 0 ? nt_arr(nt, a, "arguments", &ac) : NULL;
+    NodeKind k = ac >= 1 ? nt_kind(nt, av[0]) : NK_NilNode;
+    if (k != NK_SymbolNode && k != NK_StringNode) return 0;
+  }
+  return 1;
+}
 /* Positional parameter `pn` of method scope `s` (a required one or an
    optional one ahead of any rest), rebound nowhere: the argument each call
    of the method's name passes there, or its default. A Symbol of the name
@@ -12679,7 +12704,7 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
       if (r < 0 || (nt_kind(nt, r) != NK_ConstantReadNode && nt_kind(nt, r) != NK_ConstantPathNode)) return 0;
       const char *rn = nt_str(nt, r, "name");
       int rc = rn ? const_node_class_index(c, r) : -1;
-      if (rc < 0) { if (rn && is_builtin_class_name(rn)) continue; return 0; }
+      if (rc < 0) { if (rn && (is_builtin_class_name(rn) || pivs_const_unset(c, rn))) continue; return 0; }
       if (cplan_user_new(c, u, rc) >= 0) return 0;
       if (cplan_hook_target(c, u, rc, "initialize", NULL) != (int)(s - c->scopes)) continue;
     }

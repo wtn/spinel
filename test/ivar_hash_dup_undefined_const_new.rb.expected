@@ -1,0 +1,2 @@
+{"note" => "joined", "ack-nonce" => 7}
+{"pong-nonce" => 3, "ack-nonce" => 7}
