@@ -25,7 +25,9 @@
    <ucontext.h> include (sp_fiber_ctx.h's non-asm fallback) is never compiled
    there, and PR #1563 removed the stale unconditional include from
    spinel_rt.h. */
+#ifndef _DARWIN_C_SOURCE
 #define _DARWIN_C_SOURCE
+#endif
 #endif
 
 #include "sp_compat.h"   /* the GNU extensions behind macros; first, it sets them all */
