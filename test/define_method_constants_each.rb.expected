@@ -1,0 +1,8 @@
+["GET", [], {}]
+["HEAD", ["/", 1], {}]
+["POST", ["/x"], {body: "b"}]
+true
+[:call, :get, :head, :post]
+1
+4
+6
