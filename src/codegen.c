@@ -22485,6 +22485,33 @@ static int program_reopens_builtin_class(Compiler *c) {
   return 0;
 }
 
+/* A module the ancestors walk steps through by name: a builtin with no
+   class id that a class includes by path (`include IO::WaitReadable`),
+   held in the include lists as anc_name_code(i). */
+static const char **g_anc_names;
+static int g_anc_nnames;
+static int anc_name_code(ClassInfo *ci, const char *leaf) {
+  for (int m = 0; leaf && m < ci->nincluded_mod_names; m++) {
+    const char *n = ci->included_mod_names[m], *t = strrchr(n, ':');
+    if (!sp_streq(t ? t + 1 : n, leaf)) continue;
+    int i = 0;
+    while (i < g_anc_nnames && !sp_streq(g_anc_names[i], n)) i++;
+    if (i == g_anc_nnames) {
+      g_anc_names = realloc(g_anc_names, sizeof(char *) * (size_t)(g_anc_nnames + 1));
+      if (!g_anc_names) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
+      g_anc_names[g_anc_nnames++] = n;
+    }
+    return -1000000 - i;
+  }
+  return -1;
+}
+static void emit_anc_mod_step(Buf *b, int m) {
+  if (m <= -1000000 && -1000000 - m < g_anc_nnames)
+    buf_printf(b, "if(sp_class_anc_step(a,want,sp_box_class_name(\"%s\")))return 1;", g_anc_names[-1000000 - m]);
+  else
+    buf_printf(b, "if(sp_class_anc_step(a,want,sp_box_class(((sp_Class){%d}))))return 1;", m);
+}
+
 /* Whether builtin module `mod` is already on builtin class `bid`'s own
    chain, as the ancestors walk's builtin arm emits it (Numeric, String,
    Symbol and Time include Comparable; Array, Hash, Range, Enumerator,
@@ -22520,10 +22547,9 @@ static void emit_builtin_reopen_mod_arms(Compiler *c, int **mods, const int *nmo
       int m = mods[ci][q];
       int mb = m < 0 ? m : reopened_builtin_class_id(c, m);
       if (!incs && mb && builtin_chain_has_module(bid, mb)) continue;
-      buf_printf(b, "if(sp_class_anc_step(a,want,sp_box_class(((sp_Class){%d}))))return 1;", m);
+      emit_anc_mod_step(b, m);
       if (incs && m >= 0)
-        for (int r = nincs[m] - 1; r >= 0; r--)
-          buf_printf(b, "if(sp_class_anc_step(a,want,sp_box_class(((sp_Class){%d}))))return 1;", incs[m][r]);
+        for (int r = nincs[m] - 1; r >= 0; r--) emit_anc_mod_step(b, incs[m][r]);
     }
     buf_puts(b, "}\n");
   }
@@ -22931,6 +22957,7 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
         for (int x = g; x < ge; x++) {
           const LrMixin *m = &mx[x];
           int mid2 = elab_mixin_module(c, m);
+          if (mid2 == -1 && m->ref >= 0) mid2 = anc_name_code(&c->classes[ci], nt_str(c->nt, m->ref, "name"));
           if (mid2 == -1) continue;
           int found2 = 0;
           for (int q = 0; q < tgt_n[ci] && !found2; q++) found2 = tgt_mods[ci][q] == mid2;
@@ -23092,8 +23119,7 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
           int *zone = malloc(sizeof(int) * (size_t)cap);
           if (!zone) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
           nz = prep_zone_build(c, ci, cls_preps, cls_npreps, cls_incs, cls_nincs, zone, cap, zone_busy, zone_memo, zone_memo_n);
-          for (int z = 0; z < nz; z++)
-            buf_printf(b, " if(sp_class_anc_step(a,want,sp_box_class(((sp_Class){%d}))))return 1;", zone[z]);
+          for (int z = 0; z < nz; z++) { buf_puts(b, " "); emit_anc_mod_step(b, zone[z]); }
           free(zone);
           buf_puts(b, " break;\n");
         }
@@ -23110,8 +23136,7 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
       buf_printf(b, "    case %d:", ci);
       /* Ruby includes are prepended: last include is highest priority, so
          insert in reverse include order after the class itself. */
-      for (int q = cls_nincs[ci] - 1; q >= 0; q--)
-        buf_printf(b, " if(sp_class_anc_step(a,want,sp_box_class(((sp_Class){%d}))))return 1;", cls_incs[ci][q]);
+      for (int q = cls_nincs[ci] - 1; q >= 0; q--) { buf_puts(b, " "); emit_anc_mod_step(b, cls_incs[ci][q]); }
       buf_puts(b, " break;\n");
     }
     buf_puts(b, "    }\n");
@@ -23138,8 +23163,8 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
     buf_puts(b, "  sp_PolyArray *r=sp_PolyArray_new(); SP_GC_ROOT(r);\n");
     /* the receiver itself is not one of the modules it includes: a module's
        ancestors now start with the module, and it showed up in its own list */
-    buf_puts(b, "  for(sp_int i=0;a&&i<a->len;i++){ sp_Class m={a->data[i].v.i,NULL};\n");
-    buf_puts(b, "    if(m.cls_id==c.cls_id) continue;\n");
+    buf_puts(b, "  for(sp_int i=0;a&&i<a->len;i++){ sp_Class m=sp_unbox_class(a->data[i]);\n");
+    buf_puts(b, "    if(sp_class_eq(m,c)) continue;\n");
     buf_puts(b, "    if(sp_class_is_module_val(m)) sp_PolyArray_push(r,a->data[i]); }\n");
     buf_puts(b, "  return r;\n}\n\n");
     /* Module-aware <= by the ancestors walk (replaces simpler versions). */

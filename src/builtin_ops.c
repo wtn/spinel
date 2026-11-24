@@ -2075,7 +2075,7 @@ static const BuiltinOp bop_rows[] = {
      $T is the receiver's temp, taken by the family (or the boxed dispatch)
      before its arms. Any other argument is answered elsewhere, still a
      bool. */
-  { TY_CLASS, "include?",        1,   1, BF_ANY,      TY_BOOL,       BOPE_TEMPLATE, "({ sp_Class _cl$T = $r; sp_Class _cl$t = $e0; if (!sp_class_is_module_val(_cl$t)) sp_raise_cls(\"TypeError\", \"wrong argument type Class (expected Module)\"); _cl$T.cls_id != _cl$t.cls_id && sp_class_le(_cl$T, _cl$t); })", BOP_K(TY_CLASS) },
+  { TY_CLASS, "include?",        1,   1, BF_ANY,      TY_BOOL,       BOPE_TEMPLATE, "({ sp_Class _cl$T = $r; sp_Class _cl$t = $e0; if (!sp_class_is_module_val(_cl$t)) sp_raise_cls(\"TypeError\", \"wrong argument type Class (expected Module)\"); !sp_class_eq(_cl$T, _cl$t) && sp_class_le(_cl$T, _cl$t); })", BOP_K(TY_CLASS) },
   { TY_CLASS, "include?",        1,   1, BF_ANY,      TY_BOOL,       BOPE_NONE },
   /* Class#inherited and Module's method_added, singleton_method_added,
      method_undefined and singleton_method_undefined: private no-ops
