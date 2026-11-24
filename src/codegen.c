@@ -22769,6 +22769,33 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
        compare, a Struct.new class one. (A name-to-id table scan would cost
        eighty per call, on every poly is_a? a user object fails.) */
     buf_puts(b, "static int sp_class_kind_of_name(int cls, const char *cn){\n");
+    /* a builtin module the class has by name (`include IO::WaitReadable`),
+       its own include, a superclass's or a program module's */
+    { int nnm = 0, any_nm = 0;
+      const char **nms = NULL;
+      for (int j = 0; j < c->nclasses; j++)
+        for (int m = 0; m < c->classes[j].nincluded_mod_names; m++) {
+          const char *mn = c->classes[j].included_mod_names[m];
+          int q = 0;
+          while (q < nnm && !sp_streq(nms[q], mn)) q++;
+          if (q < nnm) continue;
+          nms = realloc(nms, sizeof(char *) * (size_t)(nnm + 1));
+          if (!nms) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
+          nms[nnm++] = mn;
+        }
+      for (int k = 0; k < c->nclasses; k++) {
+        int first = 1;
+        for (int q = 0; q < nnm; q++) {
+          if (!comp_chain_includes_core(c, k, nms[q])) continue;
+          if (!any_nm) { buf_puts(b, "  switch(cls){\n"); any_nm = 1; }
+          buf_printf(b, first ? "  case %d: if(" : "||", k);
+          buf_printf(b, "!strcmp(cn,\"%s\")", nms[q]);
+          first = 0;
+        }
+        if (!first) buf_puts(b, ")return 1; break;\n");
+      }
+      if (any_nm) buf_puts(b, "  default: break;\n  }\n");
+      free(nms); }
     buf_puts(b, "  sp_Class cur = {cls, NULL};\n");
     buf_printf(b, "  for(int _i=0;_i<%d;_i++){\n", depth);
     buf_puts(b, "    sp_Class next=cur.cls_id>=0?sp_class_superclass(cur):sp_builtin_superclass(cur);\n");
