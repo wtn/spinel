@@ -845,6 +845,17 @@ echo "$OUT" | grep -q "standalone.c is not named by \[package\] sources" ||
 echo "$OUT" | grep -q "cbits/helper.c is not named by \[package\] sources" ||
   fail "sources: the undeclared .c in a subdirectory was not reported"
 
+# An excluded directory is neither compiled nor reported, written with or
+# without a trailing slash.
+for ex in cbits cbits/; do
+  printf '[package]\nname = "excl"\nexclude = ["%s"]\n' "$ex" > spin.toml
+  OUT=$("$SPIN" run 2>&1) || fail "exclude $ex: did not build"
+  echo "$OUT" | grep -q "cbits/helper.c" && fail "exclude $ex: the excluded directory's .c was reported"
+done
+printf '[package]\nname = "excl"\nsources = ["./cbits/*.c"]\nexclude = ["./cbits/helper.c"]\n' > spin.toml
+OUT=$("$SPIN" run 2>&1) || fail "exclude ./cbits/helper.c: did not build"
+echo "$OUT" | grep -q "^cc .*helper.c$" && fail "exclude ./cbits/helper.c: the excluded source was compiled"
+
 # A glob is allowed -- it is the old behaviour, and the author owns it. What it
 # picks up beyond the sources is `exclude`'s job: that field now subtracts from
 # what `sources` named rather than from everything present.

@@ -418,14 +418,15 @@ def native_excludes(dir)
     next if g == ""
     Dir.glob(File.join(dir, g)).each do |hit|
       out += "\n" unless out == ""
-      out += hit
+      out += File.expand_path(hit)
     end
   end
   out
 end
 
 def path_excluded?(p2, excl)
-  excl.split("\n").each { |x| return true if x != "" && p2 == x }
+  full = File.expand_path(p2)
+  excl.split("\n").each { |x| return true if x != "" && full == x }
   false
 end
 
