@@ -12601,13 +12601,34 @@ static int pivs_local_writes_ok(Compiler *c, int si, const char *vn) {
     if (nt_int(nt, w, "depth", 0) > 0 && sp_streq(nt_str(nt, w, "name"), vn)) return 0;
   return 1;
 }
+/* Can the `super` u call method scope `s`? For an initialize, the method
+   the `super` reaches (cplan_super_target) is asked of each scope that runs
+   the `super`'s def, since a class that includes a module runs a copy of
+   the module's initialize: yes where one of them reaches the def of `s`, or
+   an entry that is no def. For another method, any `super` in a method of
+   the name. */
+static int pivs_super_reaches(Compiler *c, int u, Scope *s) {
+  Scope *us = comp_scope_of(c, u);
+  if (!us || !us->name || !sp_streq(us->name, s->name)) return 0;
+  if (!is_initialize_name(s->name) || s->is_cmethod || s->class_id < 0 || us->class_id < 0 || us->def_node < 0) return 1;
+  /* (a module's def: its copies carry other names where a class includes
+     several modules that define the method, so each scope is asked) */
+  int own = (int)(us - c->scopes), mod = comp_class_is_module(c, &c->classes[us->class_id]);
+  for (int t = mod ? 1 : own; t < (mod ? c->nscopes : own + 1); t++) {
+    if (c->scopes[t].def_node != us->def_node) continue;
+    int mi = cplan_super_target(c, u, &c->scopes[t], NULL);
+    if (mi >= 0 && (c->scopes[mi].def_node < 0 || c->scopes[mi].def_node == s->def_node)) return 1;
+  }
+  return 0;
+}
 /* Positional parameter `pn` of method scope `s` (a required one or an
    optional one ahead of any rest), rebound nowhere: the argument each call
    of the method's name passes there, or its default. A Symbol of the name
    (send, method, define_method) may reach it some other way, which leaves
    it unbounded. With no parameter name, follow the same calls' receivers
    to bound a root method's boxed self. */
-static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int depth) {
+static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int depth);
+static int pivs_param_walk(Compiler *c, Scope *s, const char *pn, char *set, int depth) {
   /* Compiled C dispatch supplies values without a Ruby AST call site. */
   if (c->n_cext_extensions && s->def_node >= 0 && nt_int(c->nt, s->def_node, "cext_stub", 0)) return 0;
   const NodeTable *nt = c->nt;
@@ -12631,13 +12652,13 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
   for (const char *q = mn; *q; q++)
     if (!(isalnum((unsigned char)*q) || *q == '_' || ((*q == '?' || *q == '!' || (!pn && *q == '=')) && !q[1]))) return 0;
   /* the call sites below omit a `super` from an override of this method
-     (for an initialize, an override in a subclass or a module) */
+     (for an initialize, an override in a subclass or a module, whose
+     arguments the parameter's walk follows below) */
+  int nsuper = 0;
   for (int u = pivs_ix_first(c, PX_SUPER, mn); u >= 0; u = c->pivs->next[u]) {
-    Scope *us = comp_scope_of(c, u);
-    if (!us || !us->name || !sp_streq(us->name, mn)) continue;
-    if (!init || us->class_id < 0 || comp_class_is_module(c, &c->classes[us->class_id])) return 0;
-    for (int x = us == s ? -1 : us->class_id; x >= 0; x = c->classes[x].parent)
-      if (x == s->class_id) return 0;
+    if (!pivs_super_reaches(c, u, s)) continue;
+    if (!init || !pn) return 0;
+    nsuper++;
   }
   int i = -1, dflt = -1, kwpos = 0;
   if (pn) {
@@ -12668,6 +12689,34 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
   if (init) for (int y = pivs_ix_first(c, PX_SYMBOL, "new"); y >= 0; y = c->pivs->next[y])
     if (sp_streq(nt_str(nt, y, nt_kind(nt, y) == NK_SymbolNode ? "value" : "content"), "new")) return 0;
   int ncalls = 0;
+  /* an override's `super` passes its argument on, a bare `super` the
+     override's own parameter at the place */
+  for (int u = nsuper ? pivs_ix_first(c, PX_SUPER, mn) : -1; u >= 0; u = c->pivs->next[u]) {
+    if (!pivs_super_reaches(c, u, s)) continue;
+    if (depth > 32) return 0;
+    if (nt_kind(nt, u) == NK_ForwardingSuperNode) {
+      Scope *us = comp_scope_of(c, u);
+      int ups = nt_ref(nt, us->def_node, "parameters"), urn = 0, uon = 0;
+      const int *urq = ups >= 0 ? nt_arr(nt, ups, "requireds", &urn) : NULL;
+      const int *uop = ups >= 0 ? nt_arr(nt, ups, "optionals", &uon) : NULL;
+      int up = i < urn ? urq[i] : i < urn + uon ? uop[i - urn] : -1;
+      if (up < 0 || (i < urn && nt_kind(nt, up) != NK_RequiredParameterNode) ||
+          !pivs_param(c, us, nt_str(nt, up, "name"), set, depth + 1)) return 0;
+      ncalls++;
+      continue;
+    }
+    int a = nt_ref(nt, u, "arguments"), ac = 0;
+    const int *av = a >= 0 ? nt_arr(nt, a, "arguments", &ac) : NULL;
+    for (int k = 0; k < ac && k <= i; k++) {
+      NodeKind ak = nt_kind(nt, av[k]);
+      if (ak == NK_SplatNode || ak == NK_BlockArgumentNode) return 0;
+      if (ak == NK_KeywordHashNode && !(kwpos && k == i && !nt_hash_has_splat(nt, av[k]))) return 0;
+    }
+    int x = i < ac ? av[i] : dflt;
+    if (x < 0) continue;
+    if (!pivs_value(c, x, set, depth + 1)) return 0;
+    ncalls++;
+  }
   for (int u = an_calls_named_first(c, init ? "new" : mn); u >= 0; u = an_calls_named_next(u)) {
     if (nt_kind(nt, u) != NK_CallNode || !sp_streq(nt_str(nt, u, "name"), init ? "new" : mn)) continue;
     if (init) {
@@ -12681,7 +12730,10 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
       int rc = rn ? const_node_class_index(c, r) : -1;
       if (rc < 0) { if (rn && is_builtin_class_name(rn)) continue; return 0; }
       if (cplan_user_new(c, u, rc) >= 0) return 0;
-      if (cplan_hook_target(c, u, rc, "initialize", NULL) != (int)(s - c->scopes)) continue;
+      /* (a class that includes a module runs its own copy of the module's
+         initialize: the same def) */
+      int ht = cplan_hook_target(c, u, rc, "initialize", NULL);
+      if (ht < 0 || (ht != (int)(s - c->scopes) && c->scopes[ht].def_node != s->def_node)) continue;
     }
     if (!pn) {
       int r = nt_ref(nt, u, "receiver");
@@ -12705,6 +12757,19 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
     ncalls++;
   }
   return !pn || ncalls > 0;
+}
+/* (a parameter met again while its own walk is open, through the supers of
+   modules two classes include in opposite orders, adds no value) */
+static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int depth) {
+  static struct { int def; const char *pn; } open[32];
+  static int nopen;
+  for (int k = 0; pn && k < nopen; k++)
+    if (open[k].def == s->def_node && sp_streq(open[k].pn, pn)) return 1;
+  if (!pn || nopen == 32) return pivs_param_walk(c, s, pn, set, depth);
+  open[nopen].def = s->def_node; open[nopen++].pn = pn;
+  int ok = pivs_param_walk(c, s, pn, set, depth);
+  nopen--;
+  return ok;
 }
 /* A proc parameter follows arguments only while all its calls are in sight. */
 static int pivs_proc_param(Compiler *c, int lit, const char *pn, char *set, int depth, int elems) {
