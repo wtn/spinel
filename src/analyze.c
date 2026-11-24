@@ -1995,6 +1995,24 @@ static int marshal_read_as_value(Compiler *c) {
   return ans;
 }
 
+/* Can the block of call `call` run with another self: instance_eval and
+   class_eval and their kin, a method definition, a Class.new, Struct.new
+   or Data.define body, a proc or lambda a later instance_exec may run, or
+   a block a method of the program takes (which may pass it on to one)? */
+static int self_rebinding_block(Compiler *c, int call) {
+  const NodeTable *nt = c->nt;
+  const char *n = call >= 0 && nt_kind(nt, call) == NK_CallNode ? nt_str(nt, call, "name") : NULL;
+  if (!n) return 1;
+  if (is_instance_eval_family(n) || sp_streq(n, "class_eval") || sp_streq(n, "class_exec") ||
+      sp_streq(n, "module_eval") || sp_streq(n, "module_exec") || sp_streq(n, "define_method") ||
+      sp_streq(n, "define_singleton_method") || sp_streq(n, "new") || sp_streq(n, "define") ||
+      sp_streq(n, "proc") || sp_streq(n, "lambda") || sp_streq(n, "public_send") ||
+      sp_streq(n, "send") || sp_streq(n, "__send__")) return 1;
+  for (int s = 1; s < c->nscopes; s++)
+    if (c->scopes[s].name && !c->scopes[s].is_proc_form && sp_streq(c->scopes[s].name, n)) return 1;
+  return 0;
+}
+
 /* Twice: `early`, before the type fixpoint, so that the return type a poly
    receiver's call unifies over its candidates (analyze_infer.c) leaves out a
    class no reachable code constructs -- a dead FFI wrapper's `Vector2.new`
@@ -2093,6 +2111,28 @@ void compute_instantiated(Compiler *c, int early) {
         else
           for (int k = 0; k < c->nclasses; k++)
             if (cplan_cv_ctor_builds(c, id, k)) c->classes[k].instantiated = 1;
+      }
+    }
+    /* `self.new(...)` in a class method builds what a bare `new(...)` there
+       builds (below), and only from a method something reaches. In a block
+       that may run on another self (`Other.instance_eval { self.new }`, a
+       `Class.new` body, a lambda, a block a program method takes): the
+       dynamic case below. */
+    if (recv >= 0 && nt_kind(nt, recv) == NK_SelfNode && sp_streq(name, "new")) {
+      Scope *encl = comp_scope_of(c, id);
+      const int *par = encl && encl->is_cmethod ? comp_parent_map(c) : NULL;
+      int in_block = 0, p = par ? par[id] : -1;
+      for (int d = 0; p >= 0 && p != encl->def_node && d < 256; p = par[p], d++)
+        if (nt_kind(nt, p) == NK_LambdaNode || (nt_kind(nt, p) == NK_BlockNode && self_rebinding_block(c, par[p]))) {
+          in_block = 1; break;
+        }
+      /* (a walk that stops short of the def: the dynamic case too) */
+      if (par && p >= 0 && p != encl->def_node) in_block = 1;
+      if (encl && encl->class_id >= 0 && encl->is_cmethod && !in_block) {
+        if (encl->reachable)
+          for (int k = 0; k < c->nclasses; k++)
+            if (k == encl->class_id || is_descendant(c, k, encl->class_id)) c->classes[k].instantiated = 1;
+        continue;
       }
     }
     /* C.new / C.allocate */
