@@ -286,7 +286,7 @@ static const char *sp_file_tilde_home(const char *p, const char **rest) {
 
 /* File.expand_path(path[, base]): absolute, `.`/`..`/`//`-normalized path.
    Depends only on sp_alloc.h + libc; no program-generated symbols. */
-const char *sp_file_expand_path(const char *path, const char *base) {
+const char *sp_file_expand_path(const char *path, const char *base) { sp_file_path_nil(path);
   char raw[8192];
   char cwd[4096];
   const char *home = getenv("HOME");
@@ -414,7 +414,7 @@ const char *sp_file_expand_path(const char *path, const char *base) {
 }
 
 /* File.readlink(path): the symlink target as a fresh spinel string (#3005) */
-const char *sp_file_readlink(const char *path) {SP_GC_ROOT_STR(path);
+const char *sp_file_readlink(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   char buf[4096];
   ssize_t n = readlink(path ? path : "", buf, sizeof(buf) - 1);
   if (n < 0) {
@@ -1178,7 +1178,7 @@ const char *sp_file_join(const char **parts, int n) {
      be a String nothing else holds -- a #to_path's fresh answer -- and the
      allocation can collect it. */
   size_t total = 0;
-  for (int i = 0; i < n; i++) { if (parts[i]) total += strlen(parts[i]); total++; }
+  for (int i = 0; i < n; i++) { sp_file_path_nil(parts[i]); total += strlen(parts[i]); total++; }
   char *tmp = (char *)malloc(total + 1);
   if (!tmp) sp_oom_die();
   size_t off = 0;
@@ -1199,7 +1199,7 @@ const char *sp_file_join(const char **parts, int n) {
   return r;
 }
 
-sp_StrArray *sp_file_readlines(const char *path) {SP_GC_ROOT_STR(path);
+sp_StrArray *sp_file_readlines(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   sp_StrArray *a = sp_StrArray_new();
   SP_GC_ROOT(a);
   FILE *_fp = fopen(path ? path : "", "r");
@@ -1221,7 +1221,7 @@ sp_StrArray *sp_file_readlines(const char *path) {SP_GC_ROOT_STR(path);
   return a;
 }
 
-sp_StrArray *sp_file_readlines_chomp(const char *path) {SP_GC_ROOT_STR(path);
+sp_StrArray *sp_file_readlines_chomp(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   sp_StrArray *a = sp_StrArray_new();
   SP_GC_ROOT(a);
   FILE *_fp = fopen(path ? path : "", "r");
@@ -1389,7 +1389,7 @@ const char *sp_slurp_stream_parked(sp_File *f) {SP_GC_ROOT(f);
   return r;
 }
 
-const char *sp_file_read(const char *path) {SP_GC_ROOT_STR(path);
+const char *sp_file_read(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   if (sp_file_directory(path)) {
     sp_raise_cls("Errno::EISDIR", sp_sprintf("Is a directory @ io_fread - %s", path));
   }
@@ -1751,7 +1751,7 @@ sp_int sp_file_size(const char *path) {SP_GC_ROOT_STR(path);
   return (sp_int)st.st_size;
 }
 
-sp_IntArray *sp_file_binread_bytes(const char *path) {SP_GC_ROOT_STR(path);
+sp_IntArray *sp_file_binread_bytes(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   if (sp_file_directory(path)) {
     sp_raise_cls("Errno::EISDIR", sp_sprintf("Is a directory @ io_fread - %s", path));
   }
@@ -2071,7 +2071,7 @@ sp_bool sp_poly_cbi_p(sp_RbVal v) {
 /* File.write(path, data): answers the byte count it wrote, measured by the
    same rule that sizes the write, so an embedded NUL in a stringified value
    counts once in both places. */
-sp_int sp_file_write(const char *path, const char *data) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(data);
+sp_int sp_file_write(const char *path, const char *data) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(data); sp_file_path_nil(path);
   if (sp_file_directory(path)) {
     sp_raise_cls("Errno::EISDIR", sp_sprintf("Is a directory @ rb_sysopen - %s", path));
   }
@@ -2170,7 +2170,7 @@ const char *sp_backtick(const char *cmd) {SP_GC_ROOT_STR(cmd);
   return r;
 }
 
-const char *sp_file_basename(const char *path) {SP_GC_ROOT_STR(path);
+const char *sp_file_basename(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   /* CRuby: trailing separators are ignored ("/a/b/" -> "b"); an all-separator
      path is "/" (#2784). */
   size_t end = strlen(path);
@@ -2192,7 +2192,7 @@ const char *sp_file_basename(const char *path) {SP_GC_ROOT_STR(path);
 }
 /* File.basename(path, suffix): ".*" strips the (non-leading) last extension,
    any other suffix strips a literal tail match (#2774). */
-const char *sp_file_basename2(const char *path, const char *suffix) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(suffix);
+const char *sp_file_basename2(const char *path, const char *suffix) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(suffix); sp_file_path_nil(path);
   /* a new String, read again after the copy below allocates */
   const char *base = sp_file_basename(path); SP_GC_ROOT_STR(base);
   size_t n = strlen(base);
@@ -2210,7 +2210,7 @@ const char *sp_file_basename2(const char *path, const char *suffix) {SP_GC_ROOT_
   return r;
 }
 
-const char *sp_file_extname(const char *path) {SP_GC_ROOT_STR(path);
+const char *sp_file_extname(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   /* (the extension is copied out of the path after the copy allocates) */
   const char *base = strrchr(path, '/');
   base = base ? base + 1 : path;
@@ -2907,7 +2907,7 @@ sp_StrArray *sp_File_readlines_sep(sp_File *f, const char *sep, sp_bool chomp) {
   while ((l = sp_File_gets_sep(f, sep, 0, chomp)) != NULL) sp_StrArray_push_e(a, sp_String_new_shared(l));
   return a;
 }
-sp_StrArray *sp_file_readlines_sep(const char *path, const char *sep, sp_bool chomp) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(sep);
+sp_StrArray *sp_file_readlines_sep(const char *path, const char *sep, sp_bool chomp) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(sep); sp_file_path_nil(path);
   sp_File *f = sp_File_open(path, "r");
   SP_GC_ROOT(f);
   sp_StrArray *a = sp_File_readlines_sep(f, sep, chomp);
@@ -3014,7 +3014,7 @@ sp_RbVal sp_File_putc(sp_File *f, sp_RbVal v) {
     sp_raise_cls("TypeError", v.v.b ? "no implicit conversion of true into Integer" : "no implicit conversion of false into Integer");
   return v;
 }
-const char *sp_file_ftype(const char *path) {SP_GC_ROOT_STR(path);
+const char *sp_file_ftype(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   struct stat st;
   if (lstat(path ? path : "", &st) != 0)
     sp_raise_cls("Errno::ENOENT",
@@ -3037,18 +3037,18 @@ const char *sp_file_ftype(const char *path) {SP_GC_ROOT_STR(path);
 static sp_bool sp_file_access_eff(const char *path, int mode) {
   return faccessat(AT_FDCWD, path ? path : "", mode, AT_EACCESS) == 0;
 }
-sp_bool sp_file_readable(const char *path)   {SP_GC_ROOT_STR(path); return sp_file_access_eff(path, R_OK); }
-sp_bool sp_file_writable(const char *path)   {SP_GC_ROOT_STR(path); return sp_file_access_eff(path, W_OK); }
-sp_bool sp_file_executable(const char *path) {SP_GC_ROOT_STR(path); return sp_file_access_eff(path, X_OK); }
-sp_bool sp_file_readable_real(const char *path)   { return access(path ? path : "", R_OK) == 0; }
-sp_bool sp_file_writable_real(const char *path)   { return access(path ? path : "", W_OK) == 0; }
-sp_bool sp_file_executable_real(const char *path) { return access(path ? path : "", X_OK) == 0; }
-sp_oint sp_file_size_q(const char *path) {   /* Integer size, or nil for missing/empty */
+sp_bool sp_file_readable(const char *path)   {SP_GC_ROOT_STR(path); sp_file_path_nil(path); return sp_file_access_eff(path, R_OK); }
+sp_bool sp_file_writable(const char *path)   {SP_GC_ROOT_STR(path); sp_file_path_nil(path); return sp_file_access_eff(path, W_OK); }
+sp_bool sp_file_executable(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path); return sp_file_access_eff(path, X_OK); }
+sp_bool sp_file_readable_real(const char *path)   { sp_file_path_nil(path); return access(path ? path : "", R_OK) == 0; }
+sp_bool sp_file_writable_real(const char *path)   { sp_file_path_nil(path); return access(path ? path : "", W_OK) == 0; }
+sp_bool sp_file_executable_real(const char *path) { sp_file_path_nil(path); return access(path ? path : "", X_OK) == 0; }
+sp_oint sp_file_size_q(const char *path) { if (!path) sp_raise_cls("TypeError", "no implicit conversion of nil into String");   /* Integer size, or nil for missing/empty */
   struct stat st;
   if (stat(path ? path : "", &st) != 0 || st.st_size == 0) return sp_oint_nil();
   return sp_oint_of((sp_int)st.st_size);
 }
-sp_bool sp_file_pipe(const char *path) {
+sp_bool sp_file_pipe(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return stat(path ? path : "", &st) == 0 && S_ISFIFO(st.st_mode);
 }
@@ -3062,12 +3062,12 @@ sp_bool sp_file_pipe_io(sp_File *io) {SP_GC_ROOT(io);
   struct stat st;
   return fstat(fileno(io->fp), &st) == 0 && S_ISFIFO(st.st_mode);
 }
-sp_bool sp_file_identical(const char *a, const char *b) {
+sp_bool sp_file_identical(const char *a, const char *b) { sp_file_path_nil(a); sp_file_path_nil(b);
   struct stat sa, sb;
   if (stat(a ? a : "", &sa) != 0 || stat(b ? b : "", &sb) != 0) return 0;
   return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
 }
-const char *sp_file_realpath(const char *path) {SP_GC_ROOT_STR(path);
+const char *sp_file_realpath(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   char buf[4096];
   if (!realpath(path ? path : "", buf))
     sp_raise_cls("Errno::ENOENT",
@@ -3076,7 +3076,7 @@ const char *sp_file_realpath(const char *path) {SP_GC_ROOT_STR(path);
 }
 /* realdirpath resolves every component but the last, so it answers for a name
    that does not exist yet -- where realpath raises Errno::ENOENT. */
-const char *sp_file_realdirpath(const char *path) {
+const char *sp_file_realdirpath(const char *path) { sp_file_path_nil(path);
   const char *p = path ? path : "";
   char buf[4096];
   if (realpath(p, buf)) return sp_sprintf("%s", buf);
@@ -3094,11 +3094,11 @@ const char *sp_file_realdirpath(const char *path) {
   return sp_sprintf("%s/%s", buf, base);
 }
 #if defined(_WIN32)
-sp_bool sp_file_absolute_path_p(const char *path) { return sp_file_path_root_len(path) > 0; }  /* "/", "C:/" */
+sp_bool sp_file_absolute_path_p(const char *path) { sp_file_path_nil(path); return sp_file_path_root_len(path) > 0; }  /* "/", "C:/" */
 #else
-sp_bool sp_file_absolute_path_p(const char *path) { return path && path[0] == '/'; }  /* (#2988) */
+sp_bool sp_file_absolute_path_p(const char *path) { sp_file_path_nil(path); return path && path[0] == '/'; }  /* (#2988) */
 #endif
-sp_int sp_file_chown(const char *path, sp_int uid, sp_int gid) {SP_GC_ROOT_STR(path);  /* -1 leaves that id unchanged; returns the path count (#2987) */
+sp_int sp_file_chown(const char *path, sp_int uid, sp_int gid) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);  /* -1 leaves that id unchanged; returns the path count (#2987) */
   if (chown(path ? path : "", (uid_t)uid, (gid_t)gid) != 0)
     sp_raise_cls("Errno::ENOENT", sp_sprintf("No such file or directory - %s", path ? path : ""));
   return 1;
@@ -3108,7 +3108,7 @@ static void sp_file_read_refuse_dir(FILE *fp, const char *path) {
   fclose(fp);
   sp_raise_cls("Errno::EISDIR", sp_sprintf("Is a directory @ io_fread - %s", path));
 }
-const char *sp_file_read_len(const char *path, sp_int n) {SP_GC_ROOT_STR(path);
+const char *sp_file_read_len(const char *path, sp_int n) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   FILE *fp = fopen(path ? path : "", "rb");
   if (!fp)
     sp_raise_cls("Errno::ENOENT",
@@ -3122,7 +3122,7 @@ const char *sp_file_read_len(const char *path, sp_int n) {SP_GC_ROOT_STR(path);
   sp_str_set_len(r, got);
   return r;
 }
-static FILE *sp_file_open_at(const char *path, sp_int off) {
+static FILE *sp_file_open_at(const char *path, sp_int off) { sp_file_path_nil(path);
   if (off < 0) sp_raise_cls("ArgumentError", sp_sprintf("negative offset %lld given", (long long)off));
   FILE *fp = fopen(path ? path : "", "rb");
   if (!fp) sp_file_raise_errno("rb_sysopen", path);
@@ -3132,7 +3132,7 @@ static FILE *sp_file_open_at(const char *path, sp_int off) {
   }
   return fp;
 }
-const char *sp_file_read_at(const char *path, sp_int n, sp_int off) {SP_GC_ROOT_STR(path);
+const char *sp_file_read_at(const char *path, sp_int n, sp_int off) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   FILE *fp = sp_file_open_at(path, off);
   if (n < 0) {
     fclose(fp);
@@ -3146,20 +3146,20 @@ const char *sp_file_read_at(const char *path, sp_int n, sp_int off) {SP_GC_ROOT_
   sp_str_set_len(r, got);
   return r;
 }
-const char *sp_file_read_from(const char *path, sp_int off) {SP_GC_ROOT_STR(path);
+const char *sp_file_read_from(const char *path, sp_int off) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   FILE *fp = sp_file_open_at(path, off);
   sp_file_read_refuse_dir(fp, path);
   const char *r = sp_slurp_stream(fp);
   fclose(fp);
   return r;
 }
-const char *sp_file_read_o(const char *path, sp_oint n) {
+const char *sp_file_read_o(const char *path, sp_oint n) { sp_file_path_nil(path);
   return n.nil ? sp_file_read(path) : sp_file_read_len(path, n.v);
 }
 const char *sp_file_read_at_o(const char *path, sp_oint n, sp_int off) {
   return n.nil ? sp_file_read_from(path, off) : sp_file_read_at(path, n.v, off);
 }
-sp_int sp_file_chmod(sp_int mode, const char *path) {SP_GC_ROOT_STR(path);
+sp_int sp_file_chmod(sp_int mode, const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   if (chmod(path ? path : "", (mode_t)mode) != 0)
     sp_raise_cls("Errno::ENOENT",
                  sp_sprintf("No such file or directory @ apply2files - %s", path ? path : ""));
@@ -3170,7 +3170,7 @@ sp_int sp_file_truncate(const char *path, sp_int n) {SP_GC_ROOT_STR(path);
   if (truncate(path, (off_t)n) != 0) sp_file_raise_errno("rb_file_s_truncate", path);
   return 0;
 }
-sp_int sp_file_write_at(const char *path, const char *data, sp_int off) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(data);
+sp_int sp_file_write_at(const char *path, const char *data, sp_int off) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(data); sp_file_path_nil(path);
   int fd = open(path ? path : "", O_WRONLY | O_CREAT, 0666);
   if (fd < 0)
     sp_raise_cls("Errno::ENOENT",
@@ -3180,7 +3180,7 @@ sp_int sp_file_write_at(const char *path, const char *data, sp_int off) {SP_GC_R
   close(fd);
   return w < 0 ? 0 : (sp_int)w;
 }
-sp_int sp_file_write_mode(const char *path, const char *data, const char *mode) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(data);
+sp_int sp_file_write_mode(const char *path, const char *data, const char *mode) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(data); sp_file_path_nil(path);
   FILE *fp = fopen(path ? path : "", mode && mode[0] ? mode : "w");
   if (!fp)
     sp_raise_cls("Errno::ENOENT",
@@ -3197,7 +3197,7 @@ sp_int sp_file_write_mode(const char *path, const char *data, const char *mode) 
   }
   return (sp_int)w;
 }
-sp_int sp_file_write_perm(const char *path, const char *data, const char *mode, sp_oint perm) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(data);SP_GC_ROOT_STR(mode);
+sp_int sp_file_write_perm(const char *path, const char *data, const char *mode, sp_oint perm) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(data);SP_GC_ROOT_STR(mode); sp_file_path_nil(path);
   sp_File *f = sp_File_open_perm(path, mode, perm);
   SP_GC_ROOT(f);
   size_t n = sp_str_byte_len(data ? data : sp_str_empty);
@@ -3313,7 +3313,7 @@ int sp_open_fifo_aware(const char *path, int fl, int perm) {
     sp_sleep(0.001);
   }
 }
-sp_File *sp_File_open_flags_perm(const char *path, sp_int fl, sp_oint perm) {SP_GC_ROOT_STR(path);
+sp_File *sp_File_open_flags_perm(const char *path, sp_int fl, sp_oint perm) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   path = sp_str_keep(path);   /* (the File keeps its path: a copy of a live payload, sp_str_keep) */
   int fd = sp_open_fifo_aware(path ? path : "", (int)fl | O_CLOEXEC, (int)(perm.nil ? 0666 : perm.v));
   if (fd < 0) sp_file_open_raise(path);
@@ -3326,7 +3326,7 @@ sp_File *sp_File_open_flags_perm(const char *path, sp_int fl, sp_oint perm) {SP_
   f->is_file = 1;
   return f;
 }
-sp_File *sp_File_open_flags(const char *path, sp_int fl) {
+sp_File *sp_File_open_flags(const char *path, sp_int fl) { sp_file_path_nil(path);
   return sp_File_open_flags_perm(path, fl, sp_oint_of(0666));
 }
 /* File.open(path, "w", perm): the mode string selects the open(2) flags the
@@ -3335,7 +3335,7 @@ sp_File *sp_File_open_flags(const char *path, sp_int fl) {
    form. The mode is checked before the file is opened, so a bad one raises
    CRuby's ArgumentError and leaves no descriptor behind. A nil perm is
    CRuby's default, 0666. */
-sp_File *sp_File_open_perm(const char *path, const char *mode, sp_oint perm) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(mode);
+sp_File *sp_File_open_perm(const char *path, const char *mode, sp_oint perm) {SP_GC_ROOT_STR(path);SP_GC_ROOT_STR(mode); sp_file_path_nil(path);
   path = sp_str_keep(path);   /* (the File keeps its path: a copy of a live payload, sp_str_keep) */
   const char *m = mode && mode[0] ? mode : "r";
   int fl = sp_io_mode_open_flags(m);   /* the grammar IO#reopen reads too (lib/sp_io.c) */
@@ -3355,7 +3355,7 @@ void sp_file_stat_scan(void *p) {
   if (f->path) sp_mark_string(f->path);
   if (f->mode) sp_mark_string(f->mode);
 }
-sp_File *sp_file_stat_handle(const char *path) {SP_GC_ROOT_STR(path);
+sp_File *sp_file_stat_handle(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   struct stat st;
   /* the errno's own class and message, as File.atime and File.mtime raise */
   if (stat(path ? path : "", &st) != 0) sp_file_raise_errno("rb_file_s_stat", path ? path : "");
@@ -3371,7 +3371,7 @@ sp_File *sp_file_stat_handle(const char *path) {SP_GC_ROOT_STR(path);
 /* File.lstat / File#lstat: like stat, but describing the link itself when the
    final component is a symlink. The handle records mode "lstat" so the
    accessors below read it with lstat(2). (#2986) */
-sp_File *sp_file_lstat_handle(const char *path) {SP_GC_ROOT_STR(path);
+sp_File *sp_file_lstat_handle(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   struct stat st;
   if (lstat(path ? path : "", &st) != 0) sp_file_raise_errno("rb_file_s_lstat", path ? path : "");
   sp_File *f = (sp_File *)sp_gc_alloc(sizeof(sp_File), NULL, sp_file_stat_scan);
@@ -3691,7 +3691,7 @@ static int sp_fnm_each(const char *pattern, void *ctx) {
   sp_fnm_ctx *f = (sp_fnm_ctx *)ctx;
   return sp_fnm_match(pattern, f->path, f->flags) || sp_glob_bad;
 }
-sp_bool sp_file_fnmatch(const char *pat, const char *path, sp_int flags) {
+sp_bool sp_file_fnmatch(const char *pat, const char *path, sp_int flags) { sp_file_path_nil(path);
   int fl = (int)flags;
   if (!pat) pat = "";
   if (!path) path = "";
@@ -3705,14 +3705,14 @@ sp_bool sp_file_fnmatch(const char *pat, const char *path, sp_int flags) {
   }
   return sp_fnm_match(pat, path, fl) != 0;
 }
-sp_StrArray *sp_file_split(const char *path) {SP_GC_ROOT_STR(path);
+sp_StrArray *sp_file_split(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   sp_StrArray *a = sp_StrArray_new();
   SP_GC_ROOT(a);
   sp_StrArray_push_e(a, sp_String_new_shared(sp_file_dirname(path)));
   sp_StrArray_push_e(a, sp_String_new_shared(sp_file_basename(path)));
   return a;
 }
-sp_bool sp_file_zero(const char *path) {
+sp_bool sp_file_zero(const char *path) { sp_file_path_nil(path);
   struct stat st;
   if (stat(path ? path : "", &st) != 0) return 0;
   if (S_ISDIR(st.st_mode)) return 0;
@@ -3727,7 +3727,7 @@ sp_bool sp_file_zero(const char *path) {
 #else
 #define SP_DIRNAME_SEP(c) ((c) == '/')
 #endif
-const char *sp_file_dirname(const char *path) {SP_GC_ROOT_STR(path);
+const char *sp_file_dirname(const char *path) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   size_t len = strlen(path);
   while (len > 1 && SP_DIRNAME_SEP(path[len - 1])) len--;
   const char *s = NULL;

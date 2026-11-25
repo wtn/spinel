@@ -1,0 +1,93 @@
+exist?: no implicit conversion of nil into String
+file?: no implicit conversion of nil into String
+directory?: no implicit conversion of nil into String
+readable?: no implicit conversion of nil into String
+writable?: no implicit conversion of nil into String
+executable?: no implicit conversion of nil into String
+readable_real?: no implicit conversion of nil into String
+writable_real?: no implicit conversion of nil into String
+executable_real?: no implicit conversion of nil into String
+size?: no implicit conversion of nil into String
+zero?: no implicit conversion of nil into String
+empty?: no implicit conversion of nil into String
+symlink?: no implicit conversion of nil into String
+pipe?: no implicit conversion of nil into String
+socket?: no implicit conversion of nil into String
+blockdev?: no implicit conversion of nil into String
+chardev?: no implicit conversion of nil into String
+owned?: no implicit conversion of nil into String
+grpowned?: no implicit conversion of nil into String
+setuid?: no implicit conversion of nil into String
+setgid?: no implicit conversion of nil into String
+sticky?: no implicit conversion of nil into String
+world_readable?: no implicit conversion of nil into String
+world_writable?: no implicit conversion of nil into String
+absolute_path?: no implicit conversion of nil into String
+size: no implicit conversion of nil into String
+stat: no implicit conversion of nil into String
+lstat: no implicit conversion of nil into String
+ftype: no implicit conversion of nil into String
+basename: no implicit conversion of nil into String
+dirname: no implicit conversion of nil into String
+extname: no implicit conversion of nil into String
+split: no implicit conversion of nil into String
+expand_path: no implicit conversion of nil into String
+absolute_path: no implicit conversion of nil into String
+realpath: no implicit conversion of nil into String
+readlink: no implicit conversion of nil into String
+read: no implicit conversion of nil into String
+binread: no implicit conversion of nil into String
+readlines: no implicit conversion of nil into String
+open: no implicit conversion of nil into String
+new: no implicit conversion of nil into String
+join: no implicit conversion of nil into String
+identical?: no implicit conversion of nil into String
+chmod: no implicit conversion of nil into String
+write: no implicit conversion of nil into String
+link: no implicit conversion of nil into String
+symlink: no implicit conversion of nil into String
+mkfifo: no implicit conversion of nil into String
+foreach: no implicit conversion of nil into String
+utime: no implicit conversion of nil into String
+read len: no implicit conversion of nil into String
+read len off: no implicit conversion of nil into String
+read nil off: no implicit conversion of nil into String
+binread len: no implicit conversion of nil into String
+binread len off: no implicit conversion of nil into String
+binread bytes: no implicit conversion of nil into String
+readlines chomp: no implicit conversion of nil into String
+readlines sep: no implicit conversion of nil into String
+basename suffix: no implicit conversion of nil into String
+realdirpath: no implicit conversion of nil into String
+chown: no implicit conversion of nil into String
+write off: no implicit conversion of nil into String
+write mode: no implicit conversion of nil into String
+write perm: no implicit conversion of nil into String
+binwrite: no implicit conversion of nil into String
+open mode: no implicit conversion of nil into String
+open flags: no implicit conversion of nil into String
+open flags perm: no implicit conversion of nil into String
+open mode perm: no implicit conversion of nil into String
+open block: no implicit conversion of nil into String
+new mode: no implicit conversion of nil into String
+foreach sep: no implicit conversion of nil into String
+fnmatch: no implicit conversion of nil into String
+fnmatch?: no implicit conversion of nil into String
+lutime: no implicit conversion of nil into String
+link to: no implicit conversion of nil into String
+symlink to: no implicit conversion of nil into String
+identical 2nd: no implicit conversion of nil into String
+expand base: no error
+join first: no implicit conversion of nil into String
+true
+true
+false
+false
+true
+true
+true
+"b.rb"
+".rb"
+"a"
+false
+nil

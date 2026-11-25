@@ -185,7 +185,7 @@ static void sp_File_scan(void *p) { sp_File *f = (sp_File *)p; if (f->path) sp_m
 /* The two-argument form is the permission form with CRuby's default bits:
    the same mode scan (which refuses "rx"), O_CLOEXEC, and the errno-named
    error, rather than fopen's looser mode and a flat ENOENT. */
-sp_File *sp_File_open(const char *path, const char *mode) {
+sp_File *sp_File_open(const char *path, const char *mode) { sp_file_path_nil(path);
   return sp_File_open_perm(path, mode ? mode : "r", sp_oint_nil());
 }
 
@@ -2966,17 +2966,17 @@ sp_int sp_File_rewind(sp_File *f) {
 /* ---- File metadata predicates ----
    libc / WinAPI only, no spinel-string allocation and no shared mutable
    state, so they live here rather than inline in spinel_rt.h. */
-sp_bool sp_file_directory(const char *path) {
+sp_bool sp_file_directory(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-sp_bool sp_file_file(const char *path) {
+sp_bool sp_file_file(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-sp_bool sp_file_symlink(const char *path) {
+sp_bool sp_file_symlink(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && lstat(path, &st) == 0 && S_ISLNK(st.st_mode);
 }
@@ -3014,55 +3014,55 @@ void sp_pread_check(sp_File *f, sp_int len, sp_bool outbuf) {
   sp_io_check_readable(f);
 }
 
-sp_bool sp_file_owned(const char *path) {
+sp_bool sp_file_owned(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && st.st_uid == geteuid();
 }
-sp_bool sp_file_grpowned(const char *path) {
+sp_bool sp_file_grpowned(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && st.st_gid == getegid();
 }
-sp_bool sp_file_setuid(const char *path) {
+sp_bool sp_file_setuid(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && (st.st_mode & S_ISUID) != 0;
 }
-sp_bool sp_file_setgid(const char *path) {
+sp_bool sp_file_setgid(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && (st.st_mode & S_ISGID) != 0;
 }
-sp_bool sp_file_sticky(const char *path) {
+sp_bool sp_file_sticky(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && (st.st_mode & S_ISVTX) != 0;
 }
-sp_bool sp_file_socket(const char *path) {
+sp_bool sp_file_socket(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && S_ISSOCK(st.st_mode);
 }
-sp_bool sp_file_blockdev(const char *path) {
+sp_bool sp_file_blockdev(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && S_ISBLK(st.st_mode);
 }
-sp_bool sp_file_chardev(const char *path) {
+sp_bool sp_file_chardev(const char *path) { sp_file_path_nil(path);
   struct stat st;
   return path && stat(path, &st) == 0 && S_ISCHR(st.st_mode);
 }
 /* world_readable? / world_writable?: the permission bits (0..0777) when the
    other-read / other-write bit is set, else nil (#3005) */
-sp_oint sp_file_world_readable(const char *path) {
+sp_oint sp_file_world_readable(const char *path) { sp_file_path_nil(path);
   struct stat st;
   if (!(path && stat(path, &st) == 0 && (st.st_mode & S_IROTH))) return sp_oint_nil();
   return sp_oint_of((sp_int)(st.st_mode & 0777));
 }
-sp_oint sp_file_world_writable(const char *path) {
+sp_oint sp_file_world_writable(const char *path) { sp_file_path_nil(path);
   struct stat st;
   if (!(path && stat(path, &st) == 0 && (st.st_mode & S_IWOTH))) return sp_oint_nil();
   return sp_oint_of((sp_int)(st.st_mode & 0777));
 }
-sp_int sp_file_do_symlink(const char *oldp, const char *newp) {SP_GC_ROOT_STR(newp);
+sp_int sp_file_do_symlink(const char *oldp, const char *newp) {SP_GC_ROOT_STR(newp); sp_file_path_nil(oldp); sp_file_path_nil(newp);
   if (symlink(oldp, newp) != 0) sp_file_raise_errno("symlink", newp);
   return 0;
 }
-sp_int sp_file_do_link(const char *oldp, const char *newp) {SP_GC_ROOT_STR(newp);
+sp_int sp_file_do_link(const char *oldp, const char *newp) {SP_GC_ROOT_STR(newp); sp_file_path_nil(oldp); sp_file_path_nil(newp);
   if (link(oldp, newp) != 0) sp_file_raise_errno("link", newp);
   return 0;
 }
@@ -3072,7 +3072,7 @@ sp_int sp_file_umask(sp_int mask, int have_arg) {
   umask(cur);
   return (sp_int)cur;
 }
-sp_int sp_file_mkfifo(const char *path, sp_int mode) {SP_GC_ROOT_STR(path);
+sp_int sp_file_mkfifo(const char *path, sp_int mode) {SP_GC_ROOT_STR(path); sp_file_path_nil(path);
   if (mkfifo(path, (mode_t)mode) != 0) sp_file_raise_errno("mkfifo", path);
   return 0;
 }
@@ -3084,6 +3084,7 @@ sp_int sp_file_mkfifo(const char *path, sp_int mode) {SP_GC_ROOT_STR(path);
    AT_SYMLINK_NOFOLLOW, the way lstat is to stat. */
 static sp_int sp_file_utime_at(int64_t asec, int32_t ansec, int64_t msec, int32_t mnsec,
                                const char *path, int flags, const char *who) {
+  sp_file_path_nil(path);
   struct timespec ts[2];
   ts[0].tv_sec = (time_t)asec; ts[0].tv_nsec = (long)ansec;
   ts[1].tv_sec = (time_t)msec; ts[1].tv_nsec = (long)mnsec;
@@ -3102,11 +3103,14 @@ sp_int sp_file_lutime_ns(int64_t asec, int32_t ansec, int64_t msec, int32_t mnse
 /* stat, not fopen: opening a FIFO for read blocks until a writer appears, so
    the old fopen probe hung File.exist? on a fresh mkfifo path (#3118). stat
    also answers true for directories, matching CRuby. */
-sp_bool sp_file_exist(const char *path) { struct stat st; return path && stat(path, &st) == 0; }
+sp_bool sp_file_exist(const char *path) { sp_file_path_nil(path); struct stat st; return path && stat(path, &st) == 0; }
 /* unlink(2), not remove(3): remove would take a directory too, which
    File.delete refuses (EPERM here, EISDIR on Linux), as CRuby does. */
-void sp_file_path_check(const char *path) {
+void sp_file_path_nil(const char *path) {
   if (!path) sp_raise_cls("TypeError", "no implicit conversion of nil into String");
+}
+void sp_file_path_check(const char *path) {
+  sp_file_path_nil(path);
   if (memchr(path, '\0', sp_str_byte_len(path)))
     sp_raise_cls("ArgumentError", "path name contains null byte");
 }
