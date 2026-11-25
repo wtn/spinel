@@ -1136,8 +1136,7 @@ static sp_int sp_File_write_len(sp_File *f, const char *s, size_t n) {SP_GC_ROOT
 }
 
 sp_int sp_File_write(sp_File *f, const char *s) {SP_GC_ROOT(f);SP_GC_ROOT_STR(s);
-  if (s && s[0]) sp_io_check_frozen(f);
-  SP_IO_OPEN(f);
+  /* an empty write is 0 on a closed handle too, as in CRuby */
   if (!s || !s[0]) return 0;
   sp_io_check_writable(f);
   return sp_File_write_len(f, s, strlen(s));
@@ -1151,8 +1150,6 @@ sp_int sp_File_write(sp_File *f, const char *s) {SP_GC_ROOT(f);SP_GC_ROOT_STR(s)
    callers and codegen's synthesized "" / "\n" literals are bare C literals
    with no marker byte and must use the plain entry above. */
 sp_int sp_File_write_bin(sp_File *f, const char *s) {SP_GC_ROOT(f);SP_GC_ROOT_STR(s);
-  if (s && sp_str_byte_len(s)) sp_io_check_frozen(f);
-  SP_IO_OPEN(f);
   if (!s) return 0;
   size_t n = sp_str_byte_len(s);
   if (n == 0) return 0;
@@ -1167,8 +1164,6 @@ sp_int sp_File_write_poly(sp_File *f, sp_RbVal v) {
   SP_GC_ROOT_RBVAL(v);
   size_t n;
   const char *text = sp_poly_to_s_bytes(v, &n);
-  if (n) sp_io_check_frozen(f);
-  SP_IO_OPEN(f);
   if (!n) return 0;
   sp_io_check_writable(f);
   return sp_File_write_len(f, text, n);
@@ -2936,8 +2931,6 @@ void sp_File_put_byte(sp_File *f, int c) {SP_GC_ROOT(f);
   fputc(c, f->fp);
 }
 void sp_File_print(sp_File *f, const char *s) {SP_GC_ROOT(f);SP_GC_ROOT_STR(s);
-  if (s && s[0]) sp_io_check_frozen(f);
-  SP_IO_OPEN(f);
   if (!s || !s[0]) return;
   sp_io_check_writable(f);
   if (f->is_sock || f->own_buf == SP_OWN_SOCK) { sp_sock_write(f, s, strlen(s)); return; }

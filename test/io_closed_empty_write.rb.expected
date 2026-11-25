@@ -1,0 +1,86 @@
+file write: 0
+file write var: 0
+file write nil: 0
+file write sym: 0
+file print: nil
+file print var: nil
+file print two: nil
+file print nil: nil
+file <<: true
+file << chain: true
+file printf: nil
+file printf %s: nil
+file putc: ""
+file write splat one: 0
+file write x: IOError: closed stream
+file write two: IOError: closed stream
+file write int: IOError: closed stream
+file print x: IOError: closed stream
+file print two x: IOError: closed stream
+file << x: IOError: closed stream
+file << chain x: IOError: closed stream
+file printf x: IOError: closed stream
+file putc x: IOError: closed stream
+file putc int: IOError: closed stream
+file putc nul: IOError: closed stream
+file write splat two: IOError: closed stream
+file puts: IOError: closed stream
+file puts empty: IOError: closed stream
+file syswrite: IOError: closed stream
+file write_nonblock: IOError: closed stream
+pipe write: 0
+pipe write var: 0
+pipe print: nil
+pipe <<: true
+pipe printf: nil
+pipe putc: ""
+pipe write x: IOError: closed stream
+pipe puts: IOError: closed stream
+pipe syswrite: IOError: closed stream
+pipe write_nonblock: IOError: closed stream
+read end write: 0
+read end print: nil
+read end <<: true
+read end write x: IOError: closed stream
+unix write: 0
+unix write var: 0
+unix print: nil
+unix <<: true
+unix printf: nil
+unix putc: ""
+unix write x: IOError: closed stream
+unix puts: IOError: closed stream
+unix syswrite: IOError: closed stream
+unix write_nonblock: IOError: closed stream
+unix send: IOError: closed stream
+tcp write: 0
+tcp write var: 0
+tcp print: nil
+tcp <<: true
+tcp printf: nil
+tcp putc: ""
+tcp write x: IOError: closed stream
+tcp puts: IOError: closed stream
+tcp syswrite: IOError: closed stream
+tcp write_nonblock: IOError: closed stream
+tcp send: IOError: closed stream
+stdout dup write: 0
+stdout dup print: nil
+stdout dup <<: true
+stdout dup write x: IOError: closed stream
+boxed write: 0
+boxed print: nil
+boxed <<: true
+boxed printf: nil
+boxed write x: IOError: closed stream
+boxed write two: IOError: closed stream
+boxed write splat one: 0
+boxed write splat two: IOError: closed stream
+boxed write: 0
+boxed print: nil
+boxed <<: true
+boxed printf: nil
+boxed write x: IOError: closed stream
+boxed write two: IOError: closed stream
+boxed write splat one: 0
+boxed write splat two: IOError: closed stream
