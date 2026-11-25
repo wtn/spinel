@@ -468,6 +468,7 @@ SP_NORETURN void sp_io_raise_path_errno(sp_File *f, const char *func);
 void sp_pread_check(sp_File *f, sp_int len, sp_bool outbuf);
 /* Reject nil and embedded NUL before passing a path to a syscall.
    The multi-path File.delete checks every path first. */
+void sp_file_path_nil(const char *path);
 void sp_file_path_check(const char *path);
 
 #include <dirent.h>
