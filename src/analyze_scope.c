@@ -12670,6 +12670,9 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
   int ncalls = 0;
   for (int u = an_calls_named_first(c, init ? "new" : mn); u >= 0; u = an_calls_named_next(u)) {
     if (nt_kind(nt, u) != NK_CallNode || !sp_streq(nt_str(nt, u, "name"), init ? "new" : mn)) continue;
+    /* a call in a method no call can reach never runs: it passes nothing */
+    { Scope *cs = comp_scope_of(c, u);
+      if (cs && cs->def_node >= 0 && cs->name && !cs->reachable) continue; }
     if (init) {
       /* the class a constant receiver names: a call of another class's
          initialize is none of ours; a receiver that is no constant (a

@@ -1,0 +1,2 @@
+{"note" => "ack", "ack-nonce" => 5, "from-old-session" => 99}
+{"note" => "command", "from-old-session" => 2}
