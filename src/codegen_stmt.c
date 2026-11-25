@@ -19998,17 +19998,27 @@ static int emit_multi_write_stmt_body(Compiler *c, int id, Buf *b, int indent, c
         emit_local_ref(c, lefts[0], rn0, &rb);
         emit_local_ref(c, lefts[1], wn0, &wb);
         emit_indent(b, indent);
+        /* an end whose local also holds another value (`rescue => r`) is
+           boxed */
+        char re[64], we[64];
+        snprintf(re, sizeof re, "sp_io_pipe_reader(_t%d[0])", tf);
+        snprintf(we, sizeof we, "_w%d", tf);
+        Buf rv, wv; memset(&rv, 0, sizeof rv); memset(&wv, 0, sizeof wv);
+        LocalVar *rlv = scope_local(comp_scope_of(c, lefts[0]), rn0);
+        LocalVar *wlv = scope_local(comp_scope_of(c, lefts[1]), wn0);
+        if (rlv && rlv->type == TY_POLY) emit_boxed_text(c, TY_IO, re, &rv); else buf_puts(&rv, re);
+        if (wlv && wlv->type == TY_POLY) emit_boxed_text(c, TY_IO, we, &wv); else buf_puts(&wv, we);
         buf_printf(b, "{ int _t%d[2]; sp_io_make_pipe(_t%d); ", tf, tf);
-        buf_printf(b, "%s = sp_io_pipe_reader(_t%d[0]); ", rb.p, tf);
+        buf_printf(b, "%s = %s; ", rb.p, rv.p);
         /* the write end is sync in CRuby: a write reaches the descriptor at
            once, so the reader (or an IO.select on it) sees it without a
            flush. sp_io_pipe does the same for the non-destructured call
            (#4263). */
         buf_printf(b, "sp_File *_w%d = sp_io_fdopen(_t%d[1], SPL(\"w\")); "
                       "if (_w%d) { _w%d->sync_on = 1; setvbuf(_w%d->fp, NULL, _IONBF, 0); } "
-                      "%s = _w%d; }\n",
-                   tf, tf, tf, tf, tf, wb.p, tf);
-        free(rb.p); free(wb.p);
+                      "%s = %s; }\n",
+                   tf, tf, tf, tf, tf, wb.p, wv.p);
+        free(rb.p); free(wb.p); free(rv.p); free(wv.p);
         return 1;
       }
     }
