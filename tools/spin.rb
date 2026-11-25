@@ -398,8 +398,9 @@ end
 # had no way to keep it out (#4105).
 #
 # The globs are expanded here rather than matched at each candidate, so
-# path_excluded? stays an exact compare, and naming a directory prunes its
-# whole subtree (collect_c consults it before it recurses).
+# path_excluded? compares a path with each entry and the paths under it, and
+# naming a directory prunes its whole subtree (collect_c consults it before it
+# recurses, native_sources for each declared file).
 def native_excludes(dir)
   mf = File.join(dir, "spin.toml")
   return "" unless File.exist?(mf)
@@ -426,7 +427,7 @@ end
 
 def path_excluded?(p2, excl)
   full = File.expand_path(p2)
-  excl.split("\n").each { |x| return true if x != "" && full == x }
+  excl.split("\n").each { |x| return true if x != "" && (full == x || full.start_with?(x + "/")) }
   false
 end
 
