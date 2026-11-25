@@ -3000,12 +3000,14 @@ sp_int sp_File_fsync(sp_File *f) {
   return 0;
 }
 sp_RbVal sp_File_putc(sp_File *f, sp_RbVal v) {
+  if (sp_rbval_is_string(v)) {
+    /* an empty String writes nothing, on a closed handle too */
+    const char *bytes = sp_rbval_string_bytes(v);
+    if (bytes && sp_str_byte_len(bytes)) { SP_IO_OPEN(f); sp_File_put_byte(f, bytes[0]); }
+    return v;
+  }
   SP_IO_OPEN(f);
   if (v.tag == SP_TAG_INT) sp_File_put_byte(f, (int)(v.v.i & 0xff));
-  else if (sp_rbval_is_string(v)) {
-    const char *bytes = sp_rbval_string_bytes(v);
-    if (bytes && bytes[0]) sp_File_put_byte(f, bytes[0]);
-  }
   /* anything else is no character: CRuby converts it as an Integer and
      raises for nil (the boxed nil wrote nothing and answered nil) */
   else if (v.tag == SP_TAG_NIL) sp_raise_nil_to_int(0);
