@@ -22857,6 +22857,11 @@ void cr_collect_calls(Compiler *c, const NodeTable *nt, int id,
     builtin_recv = 1;
   if (!builtin_recv && k0 == NK_CallNode && nm && names[0] == nm) builtin_recv = cr_recv_builtin_class(c, nt, id, nm);
   if (builtin_recv) names[0] = NULL;
+  /* a call a desugar marked for the builtin's own method (a class split's `t.equal?(K)`) reaches no method of
+     the program's by its name; the initialize a marked `raise` or `new` runs is marked below (cr_collect_versions) */
+  if (k0 == NK_CallNode && nm && names[0] == nm && cplan_builtin_call(c, id) && !cplan_main_text_call(c, id) &&
+      !nt_int(nt, id, "concat_builtin_version", 0) && !(sc && comp_scope_native_twin(c, sc->idx)))
+    names[0] = NULL;
   /* a builtin value is an instance: a method a reopening or an included
      module gives its class may be the one called, a class method never */
   if (g_cr_typed && k0 == NK_CallNode && nm && names[0] == nm && !nt_int(nt, id, "dyn_arm", 0) &&
