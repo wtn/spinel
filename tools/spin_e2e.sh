@@ -855,6 +855,12 @@ done
 printf '[package]\nname = "excl"\nsources = ["./cbits/*.c"]\nexclude = ["./cbits/helper.c"]\n' > spin.toml
 OUT=$("$SPIN" run 2>&1) || fail "exclude ./cbits/helper.c: did not build"
 echo "$OUT" | grep -q "^cc .*helper.c$" && fail "exclude ./cbits/helper.c: the excluded source was compiled"
+# An excluded directory also removes the sources declared under it.
+for ex in cbits cbits/; do
+  printf '[package]\nname = "excl"\nsources = ["cbits/*.c"]\nexclude = ["%s"]\n' "$ex" > spin.toml
+  OUT=$("$SPIN" run 2>&1) || fail "exclude $ex with sources: did not build"
+  echo "$OUT" | grep -q "^cc .*helper.c$" && fail "exclude $ex: a source declared under the excluded directory was compiled"
+done
 
 # A glob is allowed -- it is the old behaviour, and the author owns it. What it
 # picks up beyond the sources is `exclude`'s job: that field now subtracts from
