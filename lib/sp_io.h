@@ -65,6 +65,9 @@ typedef struct {
                                   finds nothing parks in the runtime.
                                   SP_OWN_SOCK a connected stream socket,
                                   SP_OWN_PIPE a pipe's read end */
+  unsigned char fifo_eof;      /* a read(2) of the descriptor returned 0: on
+                                  macOS select(2) no longer returns a named
+                                  FIFO readable after it */
   unsigned char park_first;    /* own_buf: the last read found nothing, so a
                                   fill on an empty rbuf parks before it reads */
   unsigned char park_first_run; /* own_buf: fills in a row that parked first */

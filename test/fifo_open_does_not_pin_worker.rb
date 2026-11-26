@@ -4,7 +4,7 @@
 # Thread#join timeout down: the first arm here printed nothing at all before
 # the fix, not even the join's answer, and the process never terminated (#4394).
 #
-# The first arm is a shape whose answer the blocking open could not produce. The
+# Every arm is a shape whose answer the blocking open could not produce. The
 # regular-file arm is the control: it does not go through the FIFO path at all
 # and has to read exactly as it always did.
 
@@ -26,15 +26,36 @@ sleep 0.1
 puts "join #{reader.join(0.3).inspect}"
 puts "status #{reader.status.inspect}"
 
-# Arms that pass DATA through a FIFO are deliberately absent, and their absence
-# is the interesting part. A reader and a writer exchanging three lines through
-# one, and a writer that opens first and is released by a later reader, both
-# answer CRuby on Linux and both hang on macOS -- on a tree with NO runtime
-# change at all, which #4406 established by running that arm alone against
-# master. So FIFO data flow between two green threads is broken on macOS
-# independently of anything here, and it is written down in docs/limitations.md
-# rather than pinned by a test that could not pass. Put those arms back with
-# the fix for it.
+# --- 2. a reader and a writer pass lines through: the bytes still arrive ---
+
+pipe = mkfifo(File.join(dir, "pipe"))
+got = []
+rd = Thread.new do
+  File.open(pipe, "r") { |f| f.each_line { |l| got << l.chomp } }
+end
+wr = Thread.new do
+  File.open(pipe, "w") { |f| 3.times { |i| f.puts "line#{i}" } }
+end
+raise "writer did not finish" unless wr.join(5)
+raise "reader did not finish" unless rd.join(5)
+puts "read #{got.inspect}"
+
+# --- 3. the writer opens FIRST, with no reader yet: it waits this side of
+#        the kernel and the reader that arrives later unblocks it ---
+
+early = mkfifo(File.join(dir, "early"))
+w2 = Thread.new do
+  File.open(early, "w") { |f| f.puts "late reader" }
+end
+# (the writer sleeps in its open; at most 1 s for it to get there)
+100.times { break if w2.status == "sleep"; sleep 0.01 }
+line = nil
+r2 = Thread.new do
+  File.open(early, "r") { |f| line = f.gets }
+end
+raise "writer did not finish" unless w2.join(5)
+raise "reader did not finish" unless r2.join(5)
+puts "late #{line.to_s.chomp.inspect}"
 
 # --- 4. control: a regular file is not a FIFO and opens as it always did ---
 
@@ -43,6 +64,6 @@ File.write(plain, "ordinary\n")
 puts "plain #{File.read(plain).chomp.inspect}"
 puts "missing #{begin; File.open(File.join(dir, "absent")); "no raise"; rescue => e; e.class.to_s; end}"
 
-[lonely, plain].each { |p| File.delete(p) rescue nil }
+[lonely, pipe, early, plain].each { |p| File.delete(p) rescue nil }
 Dir.rmdir(dir) rescue nil
 puts "end"
