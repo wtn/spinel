@@ -10019,6 +10019,26 @@ static const char *cond_def_override_why(int front) {
          "not run is not known at compile time; see docs/limitations.md";
 }
 /* the limit the call's shape names, and in *lx how a user method exempts it */
+/* The builtin whose method a super_method of the Method recv names (a String
+   subclass's concat: String), where a super from the method reaches that
+   builtin ahead of any method of the program's (a `class Object` reopening's
+   concat comes after String's); NULL otherwise */
+static const char *super_method_builtin_owner(Compiler *c, int site, int recv) {
+  int mn = recv >= 0 ? method_recv_node(c, recv) : -1;
+  int mi = mn >= 0 ? method_obj_target_mi(c, mn) : -1;
+  if (mi < 0) return NULL;
+  const Scope *s = comp_super_site(c, &c->scopes[mi]);
+  if (s->is_cmethod || s->class_id < 0 || comp_class_is_module(c, &c->classes[s->class_id])) return NULL;
+  if (cplan_super_method_target(c, mi) >= 0 && cplan_super_start(c, s) >= 0) return NULL;
+  /* (the name a super from the method looks up: an alias's own `fresh`, not `to_s`; an undef of it
+     above the method in force at the super_method call stops the lookup short of the builtin, and
+     super_method is nil) */
+  int par = comp_super_parent(c, s->class_id, 0);
+  const char *un = comp_super_name(c, par, s);
+  if (un && par >= 0 && cplan_undef_before(c, site, par, un)) return NULL;
+  return comp_super_bowner(c, s, un);
+}
+
 static const char *feature_limit(Compiler *c, int id, int *stop, int *lx, char *buf, size_t cap) {
   *stop = 1;
   *lx = LX_NONE;
@@ -10176,6 +10196,17 @@ static const char *feature_limit(Compiler *c, int id, int *stop, int *lx, char *
           "value, not to the String, so calling it could not change the String it came "
           "from. Call the method on the String directly, or wrap it in a block "
           "(`->(x) { s << x }`) (see docs/limitations.md)";
+  /* a super_method whose method behind is a builtin's (String#concat behind
+     a String subclass's concat): the plan keeps the program's chain, which
+     has none, and the nil it answered crashed a `.call` */
+  const char *smo = !why && is_super_method_name(name) ? super_method_builtin_owner(c, id, recv) : NULL;
+  if (smo) {
+    snprintf(buf, cap, "Method#super_method is not supported where the method behind is a "
+             "builtin's (%s#%s): a Method of a builtin method bound to an object of the "
+             "program's class is not modeled. Call `super` from a method instead "
+             "(see docs/limitations.md)", smo, method_sym_arg(c, method_recv_node(c, recv)));
+    why = buf;
+  }
 
   if (!why && rcn && const_node_class_index(c, recv) < 0) {
     /* Namespaces that exist only in an interpreter. Keyed on the receiver, so

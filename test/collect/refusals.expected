@@ -2116,6 +2116,24 @@ spinel: 1 refusal, nothing written
 == test/reject/super_into_method_missing_value.rb [promote] rc=1
 spinel: test/reject/super_into_method_missing_value.rb:10: a super into a method whose own super reaches method_missing is not supported (method_missing is not dispatched); see docs/limitations.md
 spinel: 1 refusal, nothing written
+== test/reject/super_method_builtin_ahead_of_object.rb [default] rc=1
+spinel: test/reject/super_method_builtin_ahead_of_object.rb:10: Method#super_method is not supported where the method behind is a builtin's (String#concat): a Method of a builtin method bound to an object of the program's class is not modeled. Call `super` from a method instead (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/super_method_builtin_ahead_of_object.rb [promote] rc=1
+spinel: test/reject/super_method_builtin_ahead_of_object.rb:10: Method#super_method is not supported where the method behind is a builtin's (String#concat): a Method of a builtin method bound to an object of the program's class is not modeled. Call `super` from a method instead (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/super_method_builtin_behind.rb [default] rc=1
+spinel: test/reject/super_method_builtin_behind.rb:12: Method#super_method is not supported where the method behind is a builtin's (String#concat): a Method of a builtin method bound to an object of the program's class is not modeled. Call `super` from a method instead (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/super_method_builtin_behind.rb [promote] rc=1
+spinel: test/reject/super_method_builtin_behind.rb:12: Method#super_method is not supported where the method behind is a builtin's (String#concat): a Method of a builtin method bound to an object of the program's class is not modeled. Call `super` from a method instead (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/super_method_builtin_undef_after_call.rb [default] rc=1
+spinel: test/reject/super_method_builtin_undef_after_call.rb:9: Method#super_method is not supported where the method behind is a builtin's (String#concat): a Method of a builtin method bound to an object of the program's class is not modeled. Call `super` from a method instead (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/super_method_builtin_undef_after_call.rb [promote] rc=1
+spinel: test/reject/super_method_builtin_undef_after_call.rb:9: Method#super_method is not supported where the method behind is a builtin's (String#concat): a Method of a builtin method bound to an object of the program's class is not modeled. Call `super` from a method instead (see docs/limitations.md)
+spinel: 1 refusal, nothing written
 == test/reject/superclass_mismatch.rb [default] rc=1
 spinel: test/reject/superclass_mismatch.rb:13: superclass mismatch for class Thing (B here, A at line 10)
 == test/reject/superclass_mismatch.rb [promote] rc=1
