@@ -549,10 +549,12 @@ static int emit_io_socket_opt_call(Compiler *c, const NodeTable *nt, const char 
       return 1;
     }
   }
+  /* the receiver first, held rooted: a Symbol or String level or option
+     name converts through a call that can allocate */
   if (sp_streq(name, "setsockopt") && argc == 3) {
-    int tl = ++g_tmp;
-    buf_printf(b, "({ sp_int _t%d = ", tl); emit_sockopt_level(c, argv[0], b);
-    buf_printf(b, "; sp_sock_setsockopt(%s, _t%d, ", r, tl);
+    int tl = ++g_tmp, tf = ++g_tmp;
+    buf_printf(b, "({ sp_File *_t%d = %s; SP_GC_ROOT(_t%d); sp_int _t%d = ", tf, r, tf, tl); emit_sockopt_level(c, argv[0], b);
+    buf_printf(b, "; sp_sock_setsockopt(_t%d, _t%d, ", tf, tl);
     emit_sockopt_optname(c, tl, argv[1], b); buf_puts(b, ", ");
     /* the value is an Integer, true/false (1/0) or the option's packed
        bytes, as CRuby takes it; only an Integer converts directly */
@@ -567,9 +569,9 @@ static int emit_io_socket_opt_call(Compiler *c, const NodeTable *nt, const char 
     return 1;
   }
   if (sp_streq(name, "getsockopt") && argc == 2) {
-    int tl = ++g_tmp;
-    buf_printf(b, "({ sp_int _t%d = ", tl); emit_sockopt_level(c, argv[0], b);
-    buf_printf(b, "; sp_sock_getsockopt(%s, _t%d, ", r, tl);
+    int tl = ++g_tmp, tf = ++g_tmp;
+    buf_printf(b, "({ sp_File *_t%d = %s; SP_GC_ROOT(_t%d); sp_int _t%d = ", tf, r, tf, tl); emit_sockopt_level(c, argv[0], b);
+    buf_printf(b, "; sp_sock_getsockopt(_t%d, _t%d, ", tf, tl);
     emit_sockopt_optname(c, tl, argv[1], b); buf_puts(b, "); })");
     return 1;
   }
