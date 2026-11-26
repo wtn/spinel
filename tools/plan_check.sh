@@ -28,7 +28,7 @@ FROM=""
 if [ "${1-}" = "--from-results" ]; then FROM=${2-}; shift 2 || exit 2; fi
 SP=$ROOT/bin/spinel
 [ -x "$SP" ] || { echo "plan-check: build bin/spinel first" >&2; exit 2; }
-JOBS=${PLAN_CHECK_JOBS:-$(nproc)}
+JOBS=${PLAN_CHECK_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}
 OUT=$(mktemp "${TMPDIR:-/tmp}/spinel-plan-check.XXXXXX")
 PARTS=$(mktemp -d "${TMPDIR:-/tmp}/spinel-plan-check-parts.XXXXXX")
 # one file per program: the parallel jobs' lines must not interleave. The
