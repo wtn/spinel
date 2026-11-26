@@ -8813,7 +8813,7 @@ static int str_arms_slice_encode(Compiler *c, int id, Buf *b, const char *name, 
        bounds (the literal form keeps its specialized arm below) */
     int trg2 = ++g_tmp;
     buf_printf(b, "({ sp_Range _t%d = sp_range_ix(", trg2); emit_expr(c, argv[0], b); buf_puts(b, ")");
-    buf_printf(b, "; sp_str_sub_range_r(%s, _t%d.first, _t%d.last, (int)_t%d.excl); })",
+    buf_printf(b, "; sp_str_sub_range_r(%s, sp_range_first_from(_t%d), _t%d.last, (int)_t%d.excl); })",
                r, trg2, trg2, trg2);
   }
   else if ((is_slice_alias(name)) && argc == 1 &&
@@ -10329,9 +10329,11 @@ static int str_arms_poly_pattern(Compiler *c, int id, Buf *b, const NodeTable *n
   ok = ok && str_arms_text(c, id, &eb, nt, name, recv, argc, argv, rs);
   view_pop(c, v);
   view_unbind(bind);
-  /* a Range (value_may_be_range) takes the substring arm:
-     s[range] read it as an Integer index */
-  if (is_slice_alias(name) && argc == 1 && value_may_be_range(c, argv[0])) {
+  /* a Range (value_may_be_range, or a value whose class facts admit one:
+     an element of a mixed Array) takes the substring arm: s[range] read it
+     as an Integer index */
+  if (is_slice_alias(name) && argc == 1 &&
+      (value_may_be_range(c, argv[0]) || (cls_fact_node(c, argv[0]) && cls_fact_may_hold_builtin(c, argv[0], CORE_RANGE)))) {
     buf_printf(&eb, ") : ((_t%d = sp_poly_frange_ix(_t%d)).tag == SP_TAG_OBJ && _t%d.cls_id == SP_BUILTIN_RANGE) ? (", tp, tp, tp);
     bind = view_bind(argv[0], "(*(sp_Range *)_t%d.v.p)", tp);
     v = view_push(c, argv[0], TY_RANGE);
