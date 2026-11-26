@@ -980,6 +980,78 @@ spinel: test/reject/define_method_body_owner_not_fixed.rb:8: Module#define_singl
 spinel: test/reject/define_method_body_yields.rb:6: Module#define_method in a method body with a block that yields to that method's block is not supported (see docs/limitations.md)
 == test/reject/define_method_body_yields.rb [promote] rc=1
 spinel: test/reject/define_method_body_yields.rb:6: Module#define_method in a method body with a block that yields to that method's block is not supported (see docs/limitations.md)
+== test/reject/define_method_constants_each_alias_downcase.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_alias_downcase.rb:12: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_alias_downcase.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_alias_downcase.rb:12: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_body_puts.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_body_puts.rb:15: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_body_puts.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_body_puts.rb:15: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_body_same_name.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_body_same_name.rb:14: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_body_same_name.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_body_same_name.rb:14: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_const_added.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_const_added.rb:14: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_const_added.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_const_added.rb:14: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_define_method_downcase.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_define_method_downcase.rb:11: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_define_method_downcase.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_define_method_downcase.rb:11: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_list_define_method.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_list_define_method.rb:11: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_list_define_method.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_list_define_method.rb:11: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_object.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_object.rb:8: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_object.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_object.rb:8: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_recv_define_method.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_recv_define_method.rb:11: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_recv_define_method.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_recv_define_method.rb:11: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_send_const_set.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_send_const_set.rb:9: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_send_const_set.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_send_const_set.rb:9: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_send_const_set_after.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_send_const_set_after.rb:8: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_send_const_set_after.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_send_const_set_after.rb:8: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_send_private_constant.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_send_private_constant.rb:10: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_send_private_constant.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_send_private_constant.rb:10: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_undef_downcase.rb [default] rc=1
+spinel: test/reject/define_method_constants_each_undef_downcase.rb:11: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
+== test/reject/define_method_constants_each_undef_downcase.rb [promote] rc=1
+spinel: test/reject/define_method_constants_each_undef_downcase.rb:11: Module#define_method with a non-literal name is not supported; use a literal Symbol or String (see docs/limitations.md)
+spinel: 1 refusal, nothing written
 == test/reject/define_method_data_block_runtime_cond_in_module.rb [default] rc=1
 spinel: test/reject/define_method_data_block_runtime_cond_in_module.rb:9: a method defined under a condition only the run time decides is not answered for by respond_to?, method_defined?, instance_methods and their kin (it would answer as if the branch had run); see docs/limitations.md
 spinel: 1 refusal, nothing written

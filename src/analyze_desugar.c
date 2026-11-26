@@ -1122,7 +1122,7 @@ int desugar_yield_in_closure_at(Compiler *c, LowerCtx *lc, int id) {
 static void xc_push(int **arr, int *n, int v);
 static void xc_push(int **arr, int *n, int v) {
   int *g = (int *)realloc(*arr, sizeof(int) * (size_t)(*n + 1));
-  if (!g) return;
+  if (!g) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
   *arr = g; (*arr)[(*n)++] = v;
 }
 static int subtree_has(const NodeTable *nt, int root, int id) {
@@ -36466,6 +36466,7 @@ static int dmu_is_name(const char *nm, const char *const *names, int nn) {
 /* Does node hold a `next`, `break`, `redo` or `retry` of the loop's own
    block (depth 0: none inside a block or a method of the body), or a write
    of one of the names? A method's body is its own scope. */
+static int dmu_params_name(const NodeTable *nt, int node, const char *nm);
 static int dmu_blocked(const NodeTable *nt, int node, const char *const *names, int nn, int depth) {
   if (node < 0) return 0;
   NodeKind k = nt_kind(nt, node);
@@ -36476,7 +36477,25 @@ static int dmu_blocked(const NodeTable *nt, int node, const char *const *names, 
   if ((k == NK_LocalVariableWriteNode || k == NK_LocalVariableOperatorWriteNode ||
        k == NK_LocalVariableOrWriteNode || k == NK_LocalVariableAndWriteNode ||
        k == NK_LocalVariableTargetNode) && dmu_is_name(nt_str(nt, node, "name"), names, nn)) return 1;
+  /* (`defined?(value)` is "local-variable" in the loop, and the literal's kind in a copy) */
+  if (k == NK_DefinedNode) {
+    int v = nt_ref(nt, node, "value");
+    /* (through parentheses, `defined?((value))`, which a later pass drops) */
+    while (v >= 0 && nt_kind(nt, v) == NK_ParenthesesNode) {
+      int pb = nt_ref(nt, v, "body"), pn = 0;
+      const int *pv = pb >= 0 && nt_kind(nt, pb) == NK_StatementsNode ? nt_arr(nt, pb, "body", &pn) : NULL;
+      v = pn == 1 ? pv[0] : pb >= 0 && nt_kind(nt, pb) != NK_StatementsNode ? pb : -1;
+    }
+    if (v >= 0 && nt_kind(nt, v) == NK_LocalVariableReadNode && dmu_is_name(nt_str(nt, v, "name"), names, nn)) return 1;
+  }
   int d = depth + (k == NK_BlockNode || k == NK_LambdaNode);
+  /* (a block's own parameter of a name hides the loop's, as in dmu_subst) */
+  const char *own[4];
+  if ((k == NK_BlockNode || k == NK_LambdaNode) && nn <= 4) {
+    int pr = nt_ref(nt, node, "parameters"), no = 0;
+    for (int i = 0; i < nn; i++) if (!dmu_params_name(nt, pr, names[i])) own[no++] = names[i];
+    names = own; nn = no;
+  }
   for (int j = 0; j < nt_num_refs(nt, node); j++)
     if (dmu_blocked(nt, nt_ref_at(nt, node, j), names, nn, d)) return 1;
   for (int j = 0; j < nt_num_arrs(nt, node); j++) {
@@ -36522,8 +36541,19 @@ static int dmu_defines(const NodeTable *nt, int node) {
    which shadows the loop's)? */
 static int dmu_params_name(const NodeTable *nt, int node, const char *nm) {
   if (node < 0) return 0;
-  const char *pn = nt_str(nt, node, "name");
-  if (pn && sp_streq(pn, nm)) return 1;
+  /* the block's own declarations: a parameter (not its default, which
+     may hold a lambda of its own), a destructured one's parts, or a
+     block-local */
+  const char *ty = nt_type(nt, node);
+  size_t tl = ty ? strlen(ty) : 0;
+  if (!ty) return 0;
+  if ((tl >= 13 && sp_streq(ty + tl - 13, "ParameterNode")) || sp_streq(ty, "BlockLocalVariableNode")) {
+    const char *pn = nt_str(nt, node, "name");
+    return pn && sp_streq(pn, nm);
+  }
+  /* (a destructured rest, `|(head, *value)|`, is a SplatNode of the MultiTargetNode) */
+  if (!sp_streq(ty, "BlockParametersNode") && !sp_streq(ty, "ParametersNode") && !sp_streq(ty, "MultiTargetNode") &&
+      !sp_streq(ty, "SplatNode")) return 0;
   for (int j = 0; j < nt_num_refs(nt, node); j++) if (dmu_params_name(nt, nt_ref_at(nt, node, j), nm)) return 1;
   for (int j = 0; j < nt_num_arrs(nt, node); j++) {
     int an = 0; const int *ids = nt_arr_at(nt, node, j, &an);
@@ -36611,13 +36641,464 @@ static void dmu_fold_names(Compiler *c, int node) {
     free(ids);
   }
 }
+/* ---- a class body's loop over its own constants ----------------------
+   `self.each do |name, method| define_method(name) { ..method.. } end`, where
+   the body's `def self.each` is `constants.each { |c| yield c.downcase,
+   const_get(c) }` (protocol-http's Methods): the loop is unrolled as a table
+   loop's, one entry per constant the body writes ahead of it, each yielded
+   value the constant's name as a Symbol (`c`, `c.downcase`, `c.upcase`) or
+   a read of the constant (`const_get(c)`). Only where `constants` can answer
+   nothing else there: the class or module has this one body and no
+   superclass, the body includes and prepends nothing and makes no class or
+   module ahead of the loop, and the program sets, removes or hides no
+   constant at run time, writes none through a path, and defines none of the
+   methods the form calls. */
+
+/* the yielded value forms: 0 `c`, 1 `c.downcase`, 2 `c.upcase`, 3 `const_get(c)`; -1 for another */
+static int dmc_form(const NodeTable *nt, int v, const char *cv) {
+  NodeKind k = nt_kind(nt, v);
+  if (k == NK_LocalVariableReadNode) return sp_streq(nt_str(nt, v, "name"), cv) ? 0 : -1;
+  if (k != NK_CallNode || nt_ref(nt, v, "block") >= 0) return -1;
+  const char *m = nt_str(nt, v, "name");
+  int r = nt_ref(nt, v, "receiver"), args = nt_ref(nt, v, "arguments"), an = 0;
+  const int *av = args >= 0 ? nt_arr(nt, args, "arguments", &an) : NULL;
+  if (m && sp_streq(m, "const_get")) {
+    if (r >= 0 && nt_kind(nt, r) != NK_SelfNode) return -1;
+    return an == 1 && nt_kind(nt, av[0]) == NK_LocalVariableReadNode && sp_streq(nt_str(nt, av[0], "name"), cv) ? 3 : -1;
+  }
+  if (an || r < 0 || nt_kind(nt, r) != NK_LocalVariableReadNode || !sp_streq(nt_str(nt, r, "name"), cv)) return -1;
+  return m && sp_streq(m, "downcase") ? 1 : m && sp_streq(m, "upcase") ? 2 : -1;
+}
+/* Is st `return to_enum(:each) unless block_given?` (or enum_for)? */
+static int dmc_enum_guard(const NodeTable *nt, int st) {
+  if (nt_kind(nt, st) != NK_UnlessNode || nt_ref(nt, st, "else_clause") >= 0) return 0;
+  int pr = nt_ref(nt, st, "predicate"), sb = nt_ref(nt, st, "statements"), sn = 0;
+  const int *ss = sb >= 0 ? nt_arr(nt, sb, "body", &sn) : NULL;
+  if (pr < 0 || nt_kind(nt, pr) != NK_CallNode || !sp_streq(nt_str(nt, pr, "name"), "block_given?") ||
+      nt_ref(nt, pr, "receiver") >= 0 || nt_ref(nt, pr, "arguments") >= 0 || nt_ref(nt, pr, "block") >= 0) return 0;
+  if (sn != 1 || nt_kind(nt, ss[0]) != NK_ReturnNode) return 0;
+  int ra = nt_ref(nt, ss[0], "arguments"), rn = 0;
+  const int *rv = ra >= 0 ? nt_arr(nt, ra, "arguments", &rn) : NULL;
+  if (rn != 1 || nt_kind(nt, rv[0]) != NK_CallNode || nt_ref(nt, rv[0], "receiver") >= 0) return 0;
+  const char *em = nt_str(nt, rv[0], "name");
+  int ea = nt_ref(nt, rv[0], "arguments"), en = 0;
+  const int *ev = ea >= 0 ? nt_arr(nt, ea, "arguments", &en) : NULL;
+  return em && (sp_streq(em, "to_enum") || sp_streq(em, "enum_for")) && en == 1 &&
+         nt_kind(nt, ev[0]) == NK_SymbolNode && sp_streq(nt_str(nt, ev[0], "value"), "each");
+}
+/* The yield of def's body when it is the constants loop, its forms in
+   forms[] (*nf of them); -1 otherwise */
+static int dmc_each_yield(const NodeTable *nt, int def, int *forms, int *nf) {
+  if (nt_ref(nt, def, "parameters") >= 0) return -1;
+  int db = nt_ref(nt, def, "body"), dn = 0;
+  const int *ds = db >= 0 && nt_kind(nt, db) == NK_StatementsNode ? nt_arr(nt, db, "body", &dn) : NULL;
+  if (dn == 2 && dmc_enum_guard(nt, ds[0])) { ds++; dn--; }
+  if (dn != 1 || nt_kind(nt, ds[0]) != NK_CallNode || !sp_streq(nt_str(nt, ds[0], "name"), "each") ||
+      nt_ref(nt, ds[0], "arguments") >= 0) return -1;
+  int cr = nt_ref(nt, ds[0], "receiver"), blk = nt_ref(nt, ds[0], "block");
+  if (cr < 0 || nt_kind(nt, cr) != NK_CallNode || !sp_streq(nt_str(nt, cr, "name"), "constants") ||
+      nt_ref(nt, cr, "arguments") >= 0 || nt_ref(nt, cr, "block") >= 0) return -1;
+  int crr = nt_ref(nt, cr, "receiver");
+  if ((crr >= 0 && nt_kind(nt, crr) != NK_SelfNode) || blk < 0 || nt_kind(nt, blk) != NK_BlockNode) return -1;
+  int bp = nt_ref(nt, blk, "parameters"), ps = bp >= 0 ? nt_ref(nt, bp, "parameters") : -1, rn = 0;
+  const int *rq = ps >= 0 ? nt_arr(nt, ps, "requireds", &rn) : NULL;
+  if (rn != 1 || nt_kind(nt, rq[0]) != NK_RequiredParameterNode) return -1;
+  /* `|c|` alone: a default, a rest or a block-local would bind or run more */
+  static const char *const OTHER[] = { "optionals", "posts", "keywords", NULL };
+  for (int i = 0; OTHER[i]; i++) { int n = 0; (void)nt_arr(nt, ps, OTHER[i], &n); if (n) return -1; }
+  int nloc = 0; (void)nt_arr(nt, bp, "locals", &nloc);
+  if (nloc || nt_ref(nt, ps, "rest") >= 0 || nt_ref(nt, ps, "keyword_rest") >= 0 || nt_ref(nt, ps, "block") >= 0) return -1;
+  const char *cv = nt_str(nt, rq[0], "name");
+  int bb = nt_ref(nt, blk, "body"), bn = 0;
+  const int *bs = bb >= 0 && nt_kind(nt, bb) == NK_StatementsNode ? nt_arr(nt, bb, "body", &bn) : NULL;
+  if (!cv || bn != 1 || nt_kind(nt, bs[0]) != NK_YieldNode) return -1;
+  int ya = nt_ref(nt, bs[0], "arguments"), yn = 0;
+  const int *yv = ya >= 0 ? nt_arr(nt, ya, "arguments", &yn) : NULL;
+  if (yn < 1 || yn > 2) return -1;
+  for (int i = 0; i < yn; i++) if ((forms[i] = dmc_form(nt, yv[i], cv)) < 0) return -1;
+  *nf = yn;
+  return bs[0];
+}
+/* The spelling of constant node p ("A::B"); 0 for a path whose head is an
+   expression */
+/* The lexical spelling of class or module frame f, its enclosing frames'
+   names ahead of its own ("Protocol::HTTP::Methods"); 0 where a header of
+   the chain is a path (`module ::A`, `class A::B`), which the run
+   resolves, or the spelling does not fit */
+static int dmc_qual(const NodeTable *nt, const int *par, int f, char *buf, size_t cap) {
+  int chain[64], n = 0;
+  for (int x = f; x >= 0; x = par[x])
+    if (class_def_opens_frame(nt, x) && (class_def_is_class(nt, x) || class_def_is_module(nt, x))) {
+      if (n == 64) return 0;
+      chain[n++] = x;
+    }
+  size_t len = 0;
+  buf[0] = '\0';
+  for (int i = n - 1; i >= 0; i--) {
+    int p = class_def_path(nt, chain[i]);
+    const char *nm = p >= 0 && nt_kind(nt, p) == NK_ConstantReadNode ? nt_str(nt, p, "name") : NULL;
+    if (!nm) return 0;
+    int w = snprintf(buf + len, cap - len, "%s%s", len ? "::" : "", nm);
+    if (w < 0 || (size_t)w >= cap - len) return 0;
+    len += (size_t)w;
+  }
+  return 1;
+}
+/* Could frame g open the class frame f opens (spelled qf)? The same
+   spelling, or one the source does not settle */
+static int dmc_same_class(const NodeTable *nt, const int *par, const char *qf, int f, int g) {
+  const char *a = class_def_name(nt, f), *b = class_def_name(nt, g);
+  if (!a || !b || !sp_streq(a, b)) return 0;
+  char qg[1024];
+  return !dmc_qual(nt, par, g, qg, sizeof qg) || sp_streq(qf, qg);
+}
+/* Is node x inside frame f? */
+static int dmc_inside(const int *par, int f, int x) {
+  for (; x >= 0; x = par[x]) if (x == f) return 1;
+  return 0;
+}
+/* A literal, or an unfrozen String literal (`+"GET"`): a value whose
+   write runs no code of the program's (+@ is checked in DEFS) */
+static int dmc_literal_value(const NodeTable *nt, int v) {
+  if (dmu_leaf_literal(nt, v)) return 1;
+  int r = v >= 0 && nt_kind(nt, v) == NK_CallNode && sp_streq(nt_str(nt, v, "name"), "+@") &&
+          nt_ref(nt, v, "arguments") < 0 && nt_ref(nt, v, "block") < 0 ? nt_ref(nt, v, "receiver") : -1;
+  return r >= 0 && nt_kind(nt, r) == NK_StringNode;
+}
+/* Is some class or module frame of the program named nm? */
+static int dmc_names_frame(const NodeTable *nt, const char *nm) {
+  for (int id = 0; nm && id < nt->count; id++)
+    if (class_def_opens_frame(nt, id) && sp_streq(class_def_name(nt, id), nm)) return 1;
+  return 0;
+}
+/* Does node assign a local outside a nested block, lambda or def (one
+   binding the copies of an unrolled body would share)? */
+static int dmc_assigns_local(const NodeTable *nt, int node) {
+  if (node < 0) return 0;
+  NodeKind k = nt_kind(nt, node);
+  if (k == NK_DefNode || k == NK_BlockNode || k == NK_LambdaNode) return 0;
+  if (k == NK_LocalVariableWriteNode || k == NK_LocalVariableOperatorWriteNode || k == NK_LocalVariableOrWriteNode ||
+      k == NK_LocalVariableAndWriteNode || k == NK_LocalVariableTargetNode) return 1;
+  for (int j = 0; j < nt_num_refs(nt, node); j++) if (dmc_assigns_local(nt, nt_ref_at(nt, node, j))) return 1;
+  for (int j = 0; j < nt_num_arrs(nt, node); j++) {
+    int an = 0; const int *ids = nt_arr_at(nt, node, j, &an);
+    for (int m = 0; m < an; m++) if (dmc_assigns_local(nt, ids[m])) return 1;
+  }
+  return 0;
+}
+/* Could the program change what `constants` answers for the class frame
+   f opens (named cname): set, remove or hide a constant of it at run time
+   (a call in its body or on a constant of its name, or on a value), or
+   write one through a path ending in its name? Or define, anywhere, a
+   method the form may call (`block_given?` in the guard), or a
+   `const_added` hook, which may hide a constant? */
+/* Is self at node id a builtin class or module, or a value only the run
+   time tells (the top level, a def, a `class << x`)? 0 for a node an
+   earlier unroll took out of its body. */
+static int dmc_builtin_self(const NodeTable *nt, const int *par, int id) {
+  for (int p = par[id]; p >= 0; p = par[p]) {
+    NodeKind k = nt_kind(nt, p);
+    if (k == NK_DefNode || k == NK_SingletonClassNode || k == NK_ProgramNode) return 1;
+    if (k == NK_ClassNode || k == NK_ModuleNode) {
+      const char *n = class_def_name(nt, p);
+      return !n || is_builtin_class_name(n) || is_builtin_module_name(n);
+    }
+  }
+  return 0;
+}
+/* ...or for call id, its receiver: self as above, or a constant (Symbol,
+   or a class of the program); another receiver is a value only the run
+   time tells */
+static int dmc_builtin_recv(const NodeTable *nt, const int *par, int id) {
+  int r = nt_ref(nt, id, "receiver");
+  if (r < 0 || nt_kind(nt, r) == NK_SelfNode) return dmc_builtin_self(nt, par, id);
+  if (nt_kind(nt, r) != NK_ConstantReadNode) return 1;
+  const char *n = nt_str(nt, r, "name");
+  return !n || is_builtin_class_name(n) || is_builtin_module_name(n);
+}
+static int dmc_program_blocks(const NodeTable *nt, const int *par, int f, const char *cname) {
+  static const char *const CALLS[] = { "const_set", "remove_const", "private_constant", "deprecate_constant",
+    "autoload", NULL };
+  static const char *const DEFS[] = { "constants", "const_get", "downcase", "upcase", "block_given?", "+@", "const_added", NULL };
+  static const char *const DEFINERS[] = { "alias_method", "define_method", "define_singleton_method", "undef_method", "remove_method", NULL };
+  for (int id = 0; id < nt->count; id++) {
+    NodeKind k = nt_kind(nt, id);
+    if (k == NK_ConstantPathWriteNode || k == NK_ConstantPathOrWriteNode ||
+        k == NK_ConstantPathOperatorWriteNode || k == NK_ConstantPathAndWriteNode || k == NK_ConstantPathTargetNode) {
+      int t = k == NK_ConstantPathTargetNode ? id : nt_ref(nt, id, "target"), tp = t >= 0 ? nt_ref(nt, t, "parent") : -1;
+      NodeKind pk = tp >= 0 ? nt_kind(nt, tp) : NK_NONE;
+      if (pk != NK_ConstantReadNode && pk != NK_ConstantPathNode) return 1;
+      /* (through the class's name, or a head no class or module of the
+         program is named, which may hold the class: `ALIAS::EXTRA = 2`
+         after `ALIAS = self`) */
+      if (sp_streq(nt_str(nt, tp, "name"), cname) || !dmc_names_frame(nt, nt_str(nt, tp, "name"))) return 1;
+    }
+    if (k == NK_CallNode && str_in(call_sent_name(nt, id, NULL), CALLS)) {
+      int r = nt_ref(nt, id, "receiver");
+      NodeKind rk = r >= 0 ? nt_kind(nt, r) : NK_NONE;
+      if (r < 0 || rk == NK_SelfNode) { if (dmc_inside(par, f, id)) return 1; }
+      else if (rk != NK_ConstantReadNode && rk != NK_ConstantPathNode) return 1;
+      else if (sp_streq(nt_str(nt, r, "name"), cname)) return 1;
+    }
+    if (k == NK_DefNode && str_in(nt_str(nt, id, "name"), DEFS)) return 1;
+    if (k == NK_UndefNode) {
+      int un = 0; const int *uv = nt_arr(nt, id, "names", &un);
+      for (int i = 0; i < un; i++) if (str_in(nt_str(nt, uv[i], "value"), DEFS)) return 1;
+    }
+    if (k == NK_AliasMethodNode) {
+      int nn = nt_ref(nt, id, "new_name");
+      if (nn >= 0 && str_in(nt_str(nt, nn, "value"), DEFS)) return 1;
+    }
+    if (k == NK_CallNode && str_in(call_sent_name(nt, id, NULL), DEFINERS)) {
+      int ac = 0, via = 0;
+      const int *av = call_args(nt, id, &ac);
+      (void)call_sent_name(nt, id, &via);
+      if (ac > via && str_in(vis_arg_name(nt, av[via]), DEFS)) return 1;
+      /* (a name a list unroll puts in, `[:downcase].each { |v| define_method(v) }`,
+         where the method may land on a builtin, or a singleton method of
+         this class's) */
+      if (ac > via && !vis_arg_name(nt, av[via]) &&
+          (dmc_builtin_recv(nt, par, id) || (dmc_inside(par, f, id) && sp_streq(call_sent_name(nt, id, NULL), "define_singleton_method"))))
+        return 1;
+    }
+    /* (a reopened Array may give `constants.each` another each) */
+    if (class_def_opens_frame(nt, id) && sp_streq(class_def_name(nt, id), "Array")) return 1;
+  }
+  return 0;
+}
+/* Does the program set or remove constant cn by name on a constant
+   (`Alias.const_set(:TOKEN, x)`, or a send of it), or by a name it
+   computes? */
+static int dmc_sets_name(const NodeTable *nt, const char *cn) {
+  for (int id = 0; id < nt->count; id++) {
+    if (nt_kind(nt, id) != NK_CallNode) continue;
+    int an = 0, via = 0;
+    const int *av = call_args(nt, id, &an);
+    const char *m = call_sent_name(nt, id, &via);
+    if (!m || (!sp_streq(m, "const_set") && !sp_streq(m, "remove_const"))) continue;
+    if (an <= via) continue;
+    NodeKind ak = nt_kind(nt, av[via]);
+    const char *nm = ak == NK_SymbolNode ? nt_str(nt, av[via], "value") : ak == NK_StringNode ? nt_str(nt, av[via], "content") : NULL;
+    if (!nm || sp_streq(nm, cn)) return 1;
+  }
+  return 0;
+}
+/* Does the program write constant cn through a path (`Alias::TOKEN = x`),
+   whatever the path's head? */
+static int dmc_path_writes_name(const NodeTable *nt, const char *cn) {
+  for (int id = 0; id < nt->count; id++) {
+    NodeKind k = nt_kind(nt, id);
+    if (k != NK_ConstantPathWriteNode && k != NK_ConstantPathOrWriteNode && k != NK_ConstantPathOperatorWriteNode &&
+        k != NK_ConstantPathAndWriteNode && k != NK_ConstantPathTargetNode) continue;
+    int t = k == NK_ConstantPathTargetNode ? id : nt_ref(nt, id, "target");
+    if (t >= 0 && sp_streq(nt_str(nt, t, "name"), cn)) return 1;
+  }
+  return 0;
+}
+/* Does node write constant cn (at any depth)? */
+static int dmc_writes_const(const NodeTable *nt, int node, const char *cn) {
+  if (node < 0) return 0;
+  NodeKind k = nt_kind(nt, node);
+  if ((k == NK_ConstantWriteNode || k == NK_ConstantOrWriteNode || k == NK_ConstantOperatorWriteNode ||
+       k == NK_ConstantAndWriteNode || k == NK_ConstantTargetNode) && sp_streq(nt_str(nt, node, "name"), cn)) return 1;
+  for (int j = 0; j < nt_num_refs(nt, node); j++) if (dmc_writes_const(nt, nt_ref_at(nt, node, j), cn)) return 1;
+  for (int j = 0; j < nt_num_arrs(nt, node); j++) {
+    int an = 0; const int *ids = nt_arr_at(nt, node, j, &an);
+    for (int m = 0; m < an; m++) if (dmc_writes_const(nt, ids[m], cn)) return 1;
+  }
+  return 0;
+}
+/* The entries of a `self.each` loop at statement `at` of frame's body,
+   the constants loop above: lits[2 * e + i] the literal of entry e's value
+   i, *nent the entries and *nvals the values each; the constants' names
+   as Symbols in *syms (the loop's value, `constants`). 0 where it is no
+   such loop. */
+static int dmc_entries(Compiler *c, int frame, int body, int at, int st, int **lits, int *nent, int *nvals,
+                       int **syms, int *nsyms) {
+  NodeTable *nt = (NodeTable *)c->nt;
+  int r = nt_ref(nt, st, "receiver");
+  if (frame < 0 || (r >= 0 && nt_kind(nt, r) != NK_SelfNode) || !sp_streq(nt_str(nt, st, "name"), "each") ||
+      nt_ref(nt, st, "arguments") >= 0) return 0;
+  const char *cname = class_def_name(nt, frame);
+  if (!cname || (class_def_is_class(nt, frame) && class_def_super(nt, frame) >= 0)) return 0;
+  /* (a builtin's `constants` has its own constants too: Object's String) */
+  if (is_builtin_class_name(cname) || is_builtin_module_name(cname)) return 0;
+  /* this one body of the class (asked of the parent map before any node is made) */
+  const int *par = comp_parent_map(c);
+  char qf[1024];
+  if (!dmc_qual(nt, par, frame, qf, sizeof qf)) return 0;
+  for (int id = 0; id < nt->count; id++)
+    if (id != frame && class_def_opens_frame(nt, id) && dmc_same_class(nt, par, qf, frame, id)) return 0;
+  int bn = 0; const int *bb = nt_arr(nt, body, "body", &bn);
+  /* Ahead of the loop the body holds only constant writes of literals and
+     defs (the one `def self.each` among them): nothing there can run code
+     that adds, removes or hides a constant, so `constants` at the loop
+     returns the written names. Anything else keeps the refusal. */
+  int def = -1, nconst = 0;
+  for (int i = 0; i < at; i++) {
+    int s = bb[i];
+    NodeKind k = nt_kind(nt, s);
+    if (k == NK_ConstantWriteNode && dmc_literal_value(nt, nt_ref(nt, s, "value"))) { nconst++; continue; }
+    int dr = k == NK_DefNode ? nt_ref(nt, s, "receiver") : -1;
+    if (k != NK_DefNode || (dr >= 0 && nt_kind(nt, dr) != NK_SelfNode)) return 0;
+    if (dr >= 0 && sp_streq(nt_str(nt, s, "name"), "each")) {
+      if (def >= 0) return 0;
+      def = s;
+    }
+  }
+  int forms[2], nf = 0;
+  if (def < 0 || dmc_each_yield(nt, def, forms, &nf) < 0 || dmc_program_blocks(nt, par, frame, cname)) return 0;
+  /* every check ahead of the nodes: the names, then the Symbols each yields */
+  const char **cns = malloc(sizeof(char *) * (size_t)(nconst + 1));
+  char (*nms)[2][256] = malloc(sizeof *nms * (size_t)(nconst + 1));
+  if (!cns || !nms) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
+  int e = 0, ok = 1;
+  for (int i = 0; i < at && ok; i++) {
+    if (nt_kind(nt, bb[i]) != NK_ConstantWriteNode) continue;
+    const char *cn = nt_str(nt, bb[i], "name");
+    if (!cn || strlen(cn) >= sizeof nms[0][0]) { ok = 0; break; }
+    for (int j = 0; j < e; j++) if (sp_streq(cns[j], cn)) ok = 0;
+    for (int v = 0; v < nf && ok; v++) {
+      if (forms[v] == 3) continue;
+      char *nm = nms[e][v];
+      snprintf(nm, sizeof nms[0][0], "%s", cn);
+      for (char *q = nm; *q && ok; q++) {
+        /* (a name past ASCII takes Ruby's Unicode case mapping, not this) */
+        if (forms[v] != 0 && (unsigned char)*q >= 0x80) ok = 0;
+        else *q = forms[v] == 1 ? (char)tolower((unsigned char)*q) : forms[v] == 2 ? (char)toupper((unsigned char)*q) : *q;
+      }
+    }
+    cns[e++] = cn;
+  }
+  /* two constants of one name a block variable takes (GET and Get,
+     downcased) define it in `constants`' order, which this does not follow */
+  for (int v = 0; ok && v < nf; v++)
+    for (int a = 0; ok && forms[v] != 3 && a < e; a++)
+      for (int b = a + 1; ok && b < e; b++)
+        if (sp_streq(nms[a][v], nms[b][v])) ok = 0;
+  /* a write of one of the constants from the loop on (`TOKEN = +"new"`):
+     the methods read the constant, where the block had the value the loop saw */
+  for (int i = at; ok && i < bn; i++)
+    for (int j = 0; ok && j < e; j++)
+      if (dmc_writes_const(nt, bb[i], cns[j])) ok = 0;
+  /* ...or through a path anywhere, an alias of the class's (`A::TOKEN = x`
+     or `A.const_set(:TOKEN, x)` after `A = Catalog`) */
+  for (int j = 0; ok && j < e; j++)
+    if (dmc_path_writes_name(nt, cns[j]) || dmc_sets_name(nt, cns[j])) ok = 0;
+  if (!ok) { free(cns); free(nms); return 0; }
+  int *out = malloc(sizeof(int) * (size_t)(2 * e + 1)), *sy = malloc(sizeof(int) * (size_t)(e + 1));
+  if (!out || !sy) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
+  int line = (int)nt_int(nt, st, "node_line", 0), file = (int)nt_int(nt, st, "node_file", 0);
+  for (int k = 0; k < e && ok; k++) {
+    for (int v = 0; v < nf && ok; v++) {
+      int lit = nt_new_node(nt, forms[v] == 3 ? "ConstantReadNode" : "SymbolNode");
+      if (lit < 0) { ok = 0; break; }
+      if (forms[v] == 3) nt_node_set_str(nt, lit, "name", cns[k]);
+      else nt_node_set_str(nt, lit, "value", nms[k][v]);
+      nt_node_set_int(nt, lit, "node_line", line);
+      nt_node_set_int(nt, lit, "node_file", file);
+      out[k * 2 + v] = lit;
+    }
+    int sym = ok ? nt_new_node(nt, "SymbolNode") : -1;
+    if (sym < 0) { ok = 0; break; }
+    nt_node_set_str(nt, sym, "value", cns[k]);
+    nt_node_set_int(nt, sym, "node_line", line);
+    sy[k] = sym;
+  }
+  free(cns); free(nms);
+  comp_grow_node_arrays(c);
+  if (!ok) { free(out); free(sy); return 0; }
+  *lits = out; *nent = e; *nvals = nf; *syms = sy; *nsyms = e;
+  return 1;
+}
+/* Is statement at, of frame's body, the body's last and the frame's value
+   read? A class statement of a body of statements is read where it is the
+   last one of a class or module body, or of another body that returns it;
+   the file's top level is not read. */
+static int dmc_value_read(Compiler *c, int frame, int body, int at) {
+  NodeTable *nt = (NodeTable *)c->nt;
+  int bn = 0; (void)nt_arr(nt, body, "body", &bn);
+  if (at != bn - 1) return 0;
+  const int *par = comp_parent_map(c);
+  int st = par[frame];
+  if (st < 0 || nt_kind(nt, st) != NK_StatementsNode) return 1;
+  int owner = par[st];
+  if (owner < 0 || nt_kind(nt, owner) == NK_ProgramNode) return 0;
+  int on = 0; const int *ob = nt_arr(nt, st, "body", &on);
+  return on > 0 && ob[on - 1] == frame;
+}
+/* The `self.each` loop st over the body's constants (dmc_entries),
+   unrolled into *out as a table loop is, then `constants`' Symbols, its
+   value: 1, or 0 where it is no such loop */
+static int dmu_unroll_constants(Compiler *c, int frame, int body, int at, int st, int **out, int *no) {
+  NodeTable *nt = (NodeTable *)c->nt;
+  int blk = nt_ref(nt, st, "block");
+  if (blk < 0 || nt_kind(nt, blk) != NK_BlockNode || !sp_streq(nt_str(nt, st, "name"), "each")) return 0;
+  int bp = nt_ref(nt, blk, "parameters");
+  int ps = bp >= 0 ? nt_ref(nt, bp, "parameters") : -1;
+  if (bp < 0 || nt_kind(nt, bp) != NK_BlockParametersNode || ps < 0) return 0;
+  static const char *const OTHER[] = { "optionals", "posts", "keywords", NULL };
+  for (int i = 0; OTHER[i]; i++) { int n = 0; (void)nt_arr(nt, ps, OTHER[i], &n); if (n) return 0; }
+  if (nt_ref(nt, ps, "rest") >= 0 || nt_ref(nt, ps, "keyword_rest") >= 0 || nt_ref(nt, ps, "block") >= 0) return 0;
+  /* (a block-local, `|name; saved|`, would become the class body's local) */
+  int nloc = 0; (void)nt_arr(nt, bp, "locals", &nloc);
+  if (nloc) return 0;
+  int rn = 0; const int *rq = nt_arr(nt, ps, "requireds", &rn);
+  if (rn < 1 || rn > 2) return 0;
+  const char *names[2];
+  for (int i = 0; i < rn; i++)
+    if (nt_kind(nt, rq[i]) != NK_RequiredParameterNode || !(names[i] = nt_str(nt, rq[i], "name"))) return 0;
+  int bbody = nt_ref(nt, blk, "body");
+  if (bbody < 0 || nt_kind(nt, bbody) != NK_StatementsNode) return 0;
+  if (dmu_defines(nt, bbody) <= 0 || dmu_blocked(nt, bbody, names, rn, 0) || dmc_assigns_local(nt, bbody)) return 0;
+  /* (each statement a define_method on self of a block variable's name:
+     CRuby's `constants` order is its constant table's, so a `puts name` or
+     a `define_method(:last)` there could end in another state) */
+  int bsn = 0; const int *bss = nt_arr(nt, bbody, "body", &bsn);
+  for (int i = 0; i < bsn; i++) {
+    int r = nt_kind(nt, bss[i]) == NK_CallNode ? nt_ref(nt, bss[i], "receiver") : -2;
+    if (r == -2 || (r >= 0 && nt_kind(nt, r) != NK_SelfNode) || !sp_streq(nt_str(nt, bss[i], "name"), "define_method")) return 0;
+    int dn = 0; const int *dv = call_args(nt, bss[i], &dn);
+    const char *vn = dn >= 1 && nt_kind(nt, dv[0]) == NK_LocalVariableReadNode ? nt_str(nt, dv[0], "name") : NULL;
+    if (!vn || !(sp_streq(vn, names[0]) || (rn > 1 && sp_streq(vn, names[1])))) return 0;
+  }
+  /* (the loop's value, `constants` in CRuby's order, is the class body's
+     value as its last statement: refused where the class's value is read,
+     `result = class M ... end`) */
+  if (dmc_value_read(c, frame, body, at)) return 0;
+  int *lits = NULL, *syms = NULL, nent = 0, nvals = 0, nsyms = 0;
+  if (!dmc_entries(c, frame, body, at, st, &lits, &nent, &nvals, &syms, &nsyms)) return 0;
+  /* one yielded value per block variable, as a table entry's */
+  if (nvals != rn) { free(lits); free(syms); return 0; }
+  int live[2] = { 1, 1 };
+  for (int e = 0; e < nent; e++) {
+    int copy = nt_clone_subtree(nt, bbody);
+    comp_grow_node_arrays(c);
+    dmu_subst(nt, copy, names, lits + 2 * e, rn, live);
+    comp_grow_node_arrays(c);
+    dmu_fold_names(c, copy);
+    int cn = 0; const int *cs = nt_arr(nt, copy, "body", &cn);
+    for (int m = 0; m < cn; m++) xc_push(out, no, cs[m]);
+  }
+  int arr = nt_new_node(nt, "ArrayNode");
+  if (arr >= 0) {
+    nt_node_set_arr(nt, arr, "elements", syms, nsyms);
+    nt_node_set_int(nt, arr, "node_line", nt_int(nt, st, "node_line", 0));
+    nt_node_set_int(nt, arr, "node_file", nt_int(nt, st, "node_file", 0));
+    comp_grow_node_arrays(c);
+    xc_push(out, no, arr);
+  }
+  free(lits); free(syms);
+  return 1;
+}
 /* The loop statement st of a class body, unrolled into *out (its
    statements, then the table): 1, or 0 where it is no such loop. body and
    at: the body and st's index there, the table's constant looked up ahead
    of it. */
-static int dmu_unroll_one(Compiler *c, const int *recv_of, int n0, int body, int at, int st, int **out, int *no) {
+static int dmu_unroll_one(Compiler *c, const int *recv_of, int n0, int frame, int body, int at, int st, int **out, int *no) {
   NodeTable *nt = (NodeTable *)c->nt;
   if (nt_kind(nt, st) != NK_CallNode) return 0;
+  if (dmu_unroll_constants(c, frame, body, at, st, out, no)) return 1;
   const char *nm = nt_str(nt, st, "name");
   if (!nm || !(sp_streq(nm, "each") || sp_streq(nm, "each_pair")) || nt_ref(nt, st, "arguments") >= 0) return 0;
   int blk = nt_ref(nt, st, "block"), r = nt_ref(nt, st, "receiver");
@@ -36703,7 +37184,7 @@ int desugar_table_loop_defines(Compiler *c) {
       int *out = NULL, no = 0, hit = 0;
       for (int i = 0; i < bn; i++) {
         int *part = NULL, np = 0;
-        if (!hit && bb[i] < n0 && dmu_unroll_one(c, recv_of, n0, body, i, bb[i], &part, &np)) {
+        if (!hit && bb[i] < n0 && dmu_unroll_one(c, recv_of, n0, id, body, i, bb[i], &part, &np)) {
           for (int m = 0; m < np; m++) xc_push(&out, &no, part[m]);
           hit = 1;
         }
