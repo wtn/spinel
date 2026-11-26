@@ -32,6 +32,14 @@ int process_rlimit_const(const char *n) {
     "RLIMIT_SBSIZE", "RLIMIT_SIGPENDING", "RLIMIT_STACK", NULL };
   return n && str_in(n, names);
 }
+/* a Process::CLOCK_* constant of some platform's CRuby whose clock other
+   platforms lack; its value, or the NameError, comes from the run time */
+int process_clock_const(const char *n) {
+  static const char *const names[] = {
+    "CLOCK_MONOTONIC_RAW", "CLOCK_MONOTONIC_RAW_APPROX",
+    "CLOCK_UPTIME_RAW", "CLOCK_UPTIME_RAW_APPROX", NULL };
+  return n && str_in(n, names);
+}
 
 int is_builtin_class_name(const char *n) {
   const BuiltinClass *r = builtin_row(n);

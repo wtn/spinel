@@ -11129,7 +11129,7 @@ TyKind builtin_scoped_const_type(Compiler *c, int par_id, const char *par_nm, co
                sp_streq(nm, "CLOCK_PROCESS_CPUTIME_ID") || sp_streq(nm, "CLOCK_THREAD_CPUTIME_ID") ||
                sp_streq(nm, "PRIO_PROCESS") || sp_streq(nm, "PRIO_PGRP") || sp_streq(nm, "PRIO_USER") ||
                sp_streq(nm, "WNOHANG") || sp_streq(nm, "WUNTRACED") ||
-               process_rlimit_const(nm)))
+               process_rlimit_const(nm) || process_clock_const(nm)))
       return TY_INT;
     /* RLIM_INFINITY is a Bignum where rlim_t's maximum passes the Integer range */
     if (nm && (sp_streq(nm, "RLIM_INFINITY") || sp_streq(nm, "RLIM_SAVED_MAX") ||

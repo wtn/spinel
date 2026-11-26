@@ -3511,6 +3511,8 @@ static int defined_path_keys(Compiler *c, int pred, const char **early, int cap,
   if (v < 0) return -1;
   NodeKind vk = nt_kind(nt, v);
   if (vk != NK_ConstantReadNode && vk != NK_ConstantPathNode) return -1;
+  /* (the platform's <time.h> decides, at run time: emit_defined_value) */
+  if (vk == NK_ConstantPathNode && process_clock_path(c, v)) return -1;
   /* each leaf must be a member of what its parent names, not only resolve
      by its own name somewhere in the program */
   if (vk == NK_ConstantPathNode && !elab_autoload_read(c, v) && const_path_misses_member(c, v)) return -1;
@@ -3549,6 +3551,17 @@ static int defined_path_keys(Compiler *c, int pred, const char **early, int cap,
     }
     return -1;                                  /* dynamic parent: no fold */
   }
+}
+
+/* See compiler.h. */
+int process_clock_path(Compiler *c, int v) {
+  const NodeTable *nt = c->nt;
+  int par = nt_ref(nt, v, "parent");
+  NodeKind pk = nt_kind(nt, par);
+  if (!(pk == NK_ConstantReadNode || (pk == NK_ConstantPathNode && nt_ref(nt, par, "parent") < 0)) ||
+      !sp_streq(nt_str(nt, par, "name"), "Process") || !process_clock_const(nt_str(nt, v, "name")))
+    return 0;
+  return !(comp_const(c, const_key_at(c, v)) && const_path_reaches_leaf_const(c, v));
 }
 
 /* The dual: a defined? guard that is statically TRUE -- every segment of the
