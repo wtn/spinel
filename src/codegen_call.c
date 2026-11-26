@@ -5136,6 +5136,14 @@ static void emit_dynamic_send_arm(Compiler *c, int arm, int t, int mo, int *seen
     at = TY_NIL;
   }
   if (mo && method_obj_target_mi(c, arm) < 0) return;
+  /* A builtin's arm that spreads a splat and passes a block takes the
+     splat array as one argument, which the builtin's C does not accept:
+     the name is left to the dispatch's default */
+  if (nt_ref(nt, arm, "block") >= 0 && cplan_user(c, arm).mi < 0) {
+    int an = 0, spl = 0; const int *av = call_args(nt, arm, &an);
+    for (int q = 0; q < an && !spl; q++) spl = nt_kind(nt, av[q]) == NK_SplatNode;
+    if (spl) return;
+  }
   /* An arm whose argument contradicts the callee's --rbs seed raises when
      the name selects it; the typed call would reinterpret the value
      (check_seed_contradictions, #6672). */
