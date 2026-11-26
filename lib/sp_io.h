@@ -44,7 +44,9 @@ typedef struct {
                                   WRITE end is sync in CRuby too, and without
                                   the flag a byte sat in stdio where a reader
                                   -- or an IO.select on the other end -- could
-                                  not see it (#4263). */
+                                  not see it (#4263). 2 for STDERR until
+                                  #sync= : sync, and written through stdio,
+                                  which leaves stderr unbuffered */
   unsigned char frozen;        /* Object#freeze; kept here, not in the GC header,
                                   because the standard streams are static storage
                                   with no header to flip (sp_io_stdout) */
