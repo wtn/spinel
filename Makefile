@@ -1591,7 +1591,8 @@ RBS_SEED_STRICT := -Werror=incompatible-pointer-types
 # Each variant dir also carries a copy of spinel_rt.h so gcc degrades to a
 # normal textual include if the .gch is unusable. Key the directory on every
 # flag used to build the header. Clang can silently accept a stale PCH built
-# with a different -D, including the overflow mode (#4538).
+# with a different -D, including the overflow mode (#4538). Clang records
+# the header's absolute path in the .gch, so the key also covers $(CURDIR).
 CC_VERSION := $(shell $(CC) --version 2>/dev/null)
 CC_KIND := $(if $(findstring clang,$(CC_VERSION)),clang,gcc)
 PCH_FLAGS = $(CFLAGS) $(SP_OV_DEFINE) -Werror $(TEST_WARN_SUPPRESS) $(SEC_FLAGS)
@@ -1618,7 +1619,7 @@ TEST_INDIRECT_FLAGS := $(if $(TEST_INCLUDE_ENV),1,$(shell \
   for arg in $(PCH_FLAGS); do \
     case "$$arg" in ($(TEST_LOCAL_CFLAGS)) ;; (*) printf 1; exit;; esac; \
   done))
-TEST_PCH_KEY := $(if $(TEST_INDIRECT_FLAGS),,$(shell tools/result_cache.sh pch-key "$(CC)" "$(CC_VERSION)" "$(TEST_MANAGED_INCLUDE)" $(PCH_FLAGS)))
+TEST_PCH_KEY := $(if $(TEST_INDIRECT_FLAGS),,$(shell tools/result_cache.sh pch-key "$(CC)" "$(CC_VERSION)" "$(TEST_MANAGED_INCLUDE)" $(PCH_FLAGS) "$(CURDIR)"))
 PCH_ROOT := build/pch/$(CC_KIND)-$(TEST_PCH_KEY)
 TEST_HOST_OS := $(shell uname -s)
 TEST_PCHS := $(if $(TEST_PCH_KEY),$(addsuffix /spinel_rt.h.gch,$(addprefix $(PCH_ROOT)/,plain nopoly novalues)))
