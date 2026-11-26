@@ -3266,6 +3266,9 @@ static int sp_fifo_open_read(const char *path, int fl, int perm) {
      waiting, and the thread died of it at the program's end) */
   int fd = open(path, fl | O_NONBLOCK, (mode_t)perm);
   if (fd < 0) return -1;
+  /* A Thread#kill or #raise wakes the wait, but is held back until the
+     descriptor is closed. */
+  sp_fiber_defer_inject();
   /* The descriptor itself says when to go on, and the thread sleeps in
      the scheduler until it does: readable once a writer has sent bytes,
      and on Linux hung up (POLLHUP) once a writer has come and gone, which
@@ -3277,13 +3280,29 @@ static int sp_fifo_open_read(const char *path, int fl, int perm) {
      not at its open: a writer that opens and waits for the reader before
      it writes is not met. */
   for (;;) {
+    /* (inside a Fiber the thread resumed, a kill or raise waits on the thread's home fiber) */
+    sp_Fiber *home = sp_fiber_current ? sp_thread_inject_home() : NULL;
+    if (sp_fiber_current && (sp_fiber_inject_pending(sp_fiber_current) || (home && sp_fiber_inject_pending(home)))) {
+      close(fd);
+      sp_fiber_undefer_inject();
+      sp_fiber_fire_inject_if_pending();
+      errno = EINTR;
+      return -1;
+    }
     struct pollfd pf = { fd, POLLIN, 0 };
     int pr = poll(&pf, 1, 0);
-    if (pr > 0 && (pf.revents & (POLLIN | POLLHUP | POLLERR))) return sp_fifo_opened(fd);
-    if (pr < 0 && errno != EINTR) { int e = errno; close(fd); errno = e; return -1; }
+    if (pr > 0 && (pf.revents & (POLLIN | POLLHUP | POLLERR))) { sp_fiber_undefer_inject(); return sp_fifo_opened(fd); }
+    if (pr < 0 && errno != EINTR) { int e = errno; close(fd); sp_fiber_undefer_inject(); errno = e; return -1; }
     /* (the IO layer's park, in both runtimes: the one without threads has
-       no scheduler wait to link, and never comes here) */
+       no scheduler wait to link, and never comes here; with threads, a
+       timed park, since a deferred inject that lands before the park leaves
+       the thread parked until a writer comes) */
+#ifdef SP_THREADS
+    { extern int sp_sched_wait_io_timeout(int fd, short events, double timeout_s);
+      sp_sched_wait_io_timeout(fd, POLLIN, 0.05); }
+#else
     sp_io_wait_fd_readable(fd);
+#endif
   }
 }
 

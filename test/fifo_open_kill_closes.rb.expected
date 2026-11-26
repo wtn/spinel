@@ -1,0 +1,10 @@
+after kill: 0
+stop
+stop
+after raise: 0
+stop main
+after raise of main: 0
+false
+after kill in a fiber: 0
+stop
+after raise in a fiber: 0
