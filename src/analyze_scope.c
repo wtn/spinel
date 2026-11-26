@@ -12620,6 +12620,36 @@ static void pivs_each_arg(Compiler *c, const int *av, int ac, char *set, int dep
     else if (ak != NK_BlockArgumentNode) pivs_value(c, av[k], set, depth + 1);
   }
 }
+/* The value a call's arguments pass under keyword `pn`: its node, -1 when
+   the call passes none, -2 when a splat, a `**h`, a `...` or a key that is
+   no Symbol leaves the keywords unknown. */
+static int pivs_keyword_arg(const NodeTable *nt, const int *av, int ac, const char *pn) {
+  int x = -1;
+  for (int k = 0; k < ac; k++) {
+    NodeKind ak = nt_kind(nt, av[k]);
+    if (ak == NK_SplatNode || ak == NK_ForwardingArgumentsNode) return -2;
+    if (ak != NK_KeywordHashNode) continue;
+    int en = 0;
+    const int *ev = nt_arr(nt, av[k], "elements", &en);
+    for (int e = 0; e < en; e++) {
+      int key = nt_kind(nt, ev[e]) == NK_AssocNode ? nt_ref(nt, ev[e], "key") : -1;
+      if (key < 0 || nt_kind(nt, key) != NK_SymbolNode) return -2;
+      if (sp_streq(nt_str(nt, key, "value"), pn)) x = nt_ref(nt, ev[e], "value");
+    }
+  }
+  return x;
+}
+/* A Hash origins query's walk of a call whose keywords are unknown: the
+   value of each pair the call writes out. */
+static void pivs_each_pair(Compiler *c, const int *av, int ac, char *set, int depth) {
+  for (int k = 0; k < ac; k++) {
+    if (nt_kind(c->nt, av[k]) != NK_KeywordHashNode) continue;
+    int en = 0;
+    const int *ev = nt_arr(c->nt, av[k], "elements", &en);
+    for (int e = 0; e < en; e++)
+      if (nt_kind(c->nt, ev[e]) == NK_AssocNode) pivs_value(c, nt_ref(c->nt, ev[e], "value"), set, depth + 1);
+  }
+}
 /* Positional parameter `pn` of method scope `s` (a required one or an
    optional one ahead of any rest), rebound nowhere: the argument each call
    of the method's name passes there, or its default. A Symbol of the name
@@ -12666,11 +12696,11 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
     for (int x = us == s ? -1 : us->class_id; x >= 0; x = c->classes[x].parent)
       if (x == s->class_id) return 0;
   }
-  int i = -1, dflt = -1, kwpos = 0;
+  int i = -1, dflt = -1, kwpos = 0, kw = 0;
   if (pn) {
     int ps = nt_ref(nt, s->def_node, "parameters");
     int rn = 0, on = 0, kn = 0;
-    if (ps >= 0) nt_arr(nt, ps, "keywords", &kn);
+    const int *kws = ps >= 0 ? nt_arr(nt, ps, "keywords", &kn) : NULL;
     /* brace-free pairs are the last positional argument of a method
        with no keyword parameter (Hash origins queries) */
     kwpos = c->pivs->hash_mode == 1 && kn == 0 && (ps < 0 || nt_ref(nt, ps, "keyword_rest") < 0);
@@ -12680,11 +12710,18 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
       if (nt_kind(nt, rq[k]) == NK_RequiredParameterNode && sp_streq(nt_str(nt, rq[k], "name"), pn)) i = k;
     for (int k = 0; k < on && i < 0; k++)
       if (sp_streq(nt_str(nt, op[k], "name"), pn)) { i = rn + k; dflt = nt_ref(nt, op[k], "value"); }
-    if (i < 0) return 0;
+    /* a keyword parameter: the value each call passes under its name, or
+       its default */
+    for (int k = 0; k < kn && i < 0 && !kw; k++) {
+      if (!sp_streq(nt_str(nt, kws[k], "name"), pn)) continue;
+      kw = 1;
+      if (nt_kind(nt, kws[k]) == NK_OptionalKeywordParameterNode) dflt = nt_ref(nt, kws[k], "value");
+    }
+    if (i < 0 && !kw) return 0;
     /* Optional arguments precede the post-required arguments only when supplied. */
     int posts = 0;
     if (ps >= 0) nt_arr(nt, ps, "posts", &posts);
-    if (i >= rn && posts > 0) return 0;
+    if (!kw && i >= rn && posts > 0) return 0;
     int si = (int)(s - c->scopes);
     for (int w = comp_lvw_first_sc(c, si, pn); w >= 0; w = comp_lvw_next_sc(c, w))
       if (c->nscope[w] == si && sp_streq(nt_str(nt, w, "name"), pn)) return 0;
@@ -12715,16 +12752,26 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
       if (nt_kind(nt, u) == NK_SuperNode) {
         int a = nt_ref(nt, u, "arguments"), ac = 0;
         const int *av = a >= 0 ? nt_arr(nt, a, "arguments", &ac) : NULL;
+        if (kw) {
+          int x = pivs_keyword_arg(nt, av, ac, pn);
+          if (x == -2) pivs_each_pair(c, av, ac, set, depth);
+          else if (x >= 0 || dflt >= 0) pivs_value(c, x >= 0 ? x : dflt, set, depth + 1);
+          continue;
+        }
         int splat = 0;
         for (int k = 0; k < ac && k <= i; k++) splat |= nt_kind(nt, av[k]) == NK_SplatNode;
         if (splat) pivs_each_arg(c, av, ac, set, depth);
         else if (i < ac || dflt >= 0) pivs_value(c, i < ac ? av[i] : dflt, set, depth + 1);
         continue;
       }
-      int ps = nt_ref(nt, us->def_node, "parameters"), rn = 0, on = 0;
+      int ps = nt_ref(nt, us->def_node, "parameters"), rn = 0, on = 0, kn = 0;
       const int *rq = ps >= 0 ? nt_arr(nt, ps, "requireds", &rn) : NULL;
       const int *op = ps >= 0 ? nt_arr(nt, ps, "optionals", &on) : NULL;
-      int at = i < rn ? rq[i] : i - rn < on ? op[i - rn] : -1;
+      const int *kws = ps >= 0 ? nt_arr(nt, ps, "keywords", &kn) : NULL;
+      int at = -1;
+      /* (a bare `super` passes a keyword on under the keyword's own name) */
+      if (kw) { for (int k = 0; k < kn && at < 0; k++) if (sp_streq(nt_str(nt, kws[k], "name"), pn)) at = kws[k]; }
+      else at = i < rn ? rq[i] : i - rn < on ? op[i - rn] : -1;
       const char *an = at >= 0 ? nt_str(nt, at, "name") : NULL;
       /* (each initialize once per query: modules passing on to each other) */
       int ui = (int)(us - c->scopes);
@@ -12775,6 +12822,19 @@ static int pivs_param(Compiler *c, Scope *s, const char *pn, char *set, int dept
     }
     int a = nt_ref(nt, u, "arguments"), ac = 0;
     const int *av = a >= 0 ? nt_arr(nt, a, "arguments", &ac) : NULL;
+    if (kw) {
+      int x = pivs_keyword_arg(nt, av, ac, pn);
+      if (x == -2) {
+        if (!pivs_unfollowed(c)) return 0;
+        pivs_each_pair(c, av, ac, set, depth);
+        continue;
+      }
+      if (x < 0) x = dflt;
+      if (x < 0) continue;   /* a missing keyword: ArgumentError, no value */
+      if (!pivs_value(c, x, set, depth + 1)) return 0;
+      ncalls++;
+      continue;
+    }
     int shape = !loose;
     for (int k = 0; k < ac && k <= i && shape; k++) {
       NodeKind ak = nt_kind(nt, av[k]);

@@ -1,0 +1,12 @@
+{"note" => "ack", "ack-nonce" => 5, "from-old-session" => 99}
+{"note" => "command", "from-old-session" => 2}
+{"note" => "none", "from-old-session" => 3}
+{"k" => "v", "from-old-session" => 4}
+{"n" => 1, "from-old-session" => 5}
+{"note" => "named", "from-old-session" => 6}
+{"n" => 4, "from-old-session" => 7}
+{"note" => "bare", "from-old-session" => 11}
+{"n" => 2, "from-old-session" => 8}
+{"note" => "built", "from-old-session" => 9}
+{"n" => 3, "from-old-session" => 10}
+{"note" => "mixed", "from-old-session" => 10}
