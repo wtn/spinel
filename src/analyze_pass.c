@@ -5246,7 +5246,8 @@ static int infer_write_multi_assign(Compiler *c, const NodeTable *nt, const unsi
           if (!sp_streq(lty_io, "LocalVariableTargetNode")) continue;
           const char *lnm = nt_str(nt, lefts[i], "name");
           LocalVar *lv = lnm ? scope_local_intern(comp_scope_of(c, id), lnm) : NULL;
-          if (lv) lv_set_type(lv, TY_IO);   /* the end-of-pass sweep reports it */
+          /* joined with the local's other writes, such as `rescue => r` */
+          if (lv) lv_set_type(lv, ty_unify(lv->type, TY_IO));   /* the end-of-pass sweep reports it */
         }
         continue;
       }
