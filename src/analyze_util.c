@@ -1226,6 +1226,9 @@ const char *errno_canonical_name(const char *n) {
 #if defined(EDEADLOCK) && defined(EDEADLK)
     { "Errno::EDEADLOCK", "Errno::EDEADLK", EDEADLOCK == EDEADLK },
 #endif
+#if defined(ELAST) && defined(ENOTCAPABLE)
+    { "Errno::ELAST", "Errno::ENOTCAPABLE", ELAST == ENOTCAPABLE },
+#endif
     { NULL, NULL, 0 }
   };
   for (int i = 0; ALIASES[i].alias; i++)
