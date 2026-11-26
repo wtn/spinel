@@ -45630,6 +45630,18 @@ static int kwsplat_gated(NodeTable *nt, KwAliases *al, int id, const int *args, 
 static void kwsplat_drop_rows(NodeTable *nt, int id) {
   if (nt_int(nt, id, "lr_rows", -1) >= 0) nt_node_set_int(nt, id, "lr_rows", nt_int(nt, id, "lr_rows_drop", 0));
 }
+/* Is `x` a read of the rest, `**` or block parameter (`field`, a node of
+   kind `k`) of the method it is directly in? */
+static int kwsplit_own_param(const NodeTable *nt, const int *par, int npar, int x, const char *field, NodeKind k) {
+  if (x < 0 || x >= npar || nt_kind(nt, x) != NK_LocalVariableReadNode || nt_int(nt, x, "depth", 0) != 0) return 0;
+  const char *nm = nt_str(nt, x, "name");
+  int d = par[x];
+  while (d >= 0 && d < npar && nt_kind(nt, d) != NK_DefNode) d = par[d];
+  if (d < 0 || d >= npar) return 0;
+  int ps = nt_ref(nt, d, "parameters"), r = ps >= 0 ? nt_ref(nt, ps, field) : -1;
+  const char *rn = r >= 0 && nt_kind(nt, r) == k ? nt_str(nt, r, "name") : NULL;
+  return nm && rn && sp_streq(nm, rn);
+}
 /* A `**`-only call to a builtin that takes no keywords: CRuby passes nothing
    for an empty `**` operand and one new Hash for a non-empty one, whatever
    the callee is, so the call becomes the two calls and a test:
@@ -45679,6 +45691,15 @@ static void split_kwsplat_calls(Compiler *c, int from) {
      edges say so, a last statement under a modifier, a begin, a case, a
      loop body included) becomes statements of that list: spar names it.
      Asked before the first edit, of the parent map as the table stands. */
+  /* the names of the program's methods with a `**` parameter: the splat
+     dispatch keeps `r.m(*a, **k)` whole for such a name, so the split takes
+     a splat of a local too */
+  ANameHash kwrest = {0};
+  NT_FOREACH_KIND(nt, NK_DefNode, d) {
+    const char *dn = nt_str(nt, d, "name");
+    int ps = nt_ref(nt, d, "parameters"), kr = ps >= 0 ? nt_ref(nt, ps, "keyword_rest") : -1;
+    if (dn && kr >= 0 && nt_kind(nt, kr) == NK_KeywordRestParameterNode && !anh_has(&kwrest, dn)) anh_add(&kwrest, dn);
+  }
   int n0 = nt->count, *spar = calloc((size_t)n0 + 1, sizeof(int));
   if (!spar) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
   const int *par = comp_parent_map(c);
@@ -45696,10 +45717,30 @@ static void split_kwsplat_calls(Compiler *c, int from) {
     int args[24], kh = nt_argv_kwh(nt, av, n);
     for (int i = 0; i < n; i++) args[i] = av[i];
     if (kh < 0) continue;
-    /* (a spread list is the splat dispatch's) */
-    int ok = 1;
-    for (int i = 0; i < n - 1; i++)
-      if (nt_kind(nt, args[i]) == NK_SplatNode || nt_kind(nt, args[i]) == NK_ForwardingArgumentsNode) ok = 0;
+    /* (a spread list is the splat dispatch's, except the method's own rest
+       parameter beside a name in kwrest, with the method's own `**` and
+       block parameters as the other operands: none runs code, so the splat
+       read in the branch has the elements CRuby read ahead of them) */
+    int ok = 1, own_splat = 0;
+    const char *cnm = nt_str(nt, id, "name");
+    for (int i = 0; i < n - 1; i++) {
+      if (nt_kind(nt, args[i]) == NK_SplatNode) {
+        ok &= cnm && anh_has(&kwrest, cnm) &&
+              kwsplit_own_param(nt, par, n0, nt_ref(nt, args[i], "expression"), "rest", NK_RestParameterNode);
+        own_splat = 1;
+      }
+      else if (nt_kind(nt, args[i]) == NK_ForwardingArgumentsNode) ok = 0;
+    }
+    if (ok && own_splat) {
+      int ken = 0; const int *kev = nt_arr(nt, kh, "elements", &ken);
+      for (int i = 0; i < ken; i++)
+        ok &= nt_kind(nt, kev[i]) == NK_AssocSplatNode &&
+              kwsplit_own_param(nt, par, n0, nt_ref(nt, kev[i], "value"), "keyword_rest", NK_KeywordRestParameterNode);
+      int bk = nt_ref(nt, id, "block");
+      if (bk >= 0)
+        ok &= nt_kind(nt, bk) == NK_BlockArgumentNode &&
+              kwsplit_own_param(nt, par, n0, nt_ref(nt, bk, "expression"), "block", NK_BlockParameterNode);
+    }
     int ne = 0, el[16], dyn[16], ndyn = 0, full = 0, pairs = 0, splats = 0;
     const int *ev = nt_arr(nt, kh, "elements", &ne);
     if (!ev || ne < 1 || ne > 16) continue;
@@ -45771,6 +45812,8 @@ static void split_kwsplat_calls(Compiler *c, int from) {
     int hargs[24];
     for (int i = 0; i < n - 1; i++) {
       NodeKind ak = nt_kind(nt, args[i]);
+      /* (the rest parameter, which no code reassigns: LW_REST_PARAM_WRITES) */
+      if (ak == NK_SplatNode) { hargs[i] = args[i]; continue; }
       int held = !splat_leaf_node(nt, args[i]) || ak == NK_LocalVariableReadNode || ak == NK_InstanceVariableReadNode;
       hargs[i] = held ? sd_hold(c, nt, NULL, id, "kwa", i, args[i], pre, &npre) : args[i];
     }
@@ -45780,8 +45823,10 @@ static void split_kwsplat_calls(Compiler *c, int from) {
        its to_proc adds is passed: the conversion runs, then the copy is built
        and tested. With any other `&` operand, or with two `**`, the Hash is
        built first. */
-    int simple = ne == 1 && ndyn == 1 && nt_kind(nt, dyn[0]) == NK_AssocSplatNode && nt_ref(nt, dyn[0], "value") >= 0 &&
-                 blockarg_plain_read(nt, bexp);
+    /* (the method's own block parameter beside a splat is a Proc or nil,
+       passed as it is) */
+    int simple = !own_splat && ne == 1 && ndyn == 1 && nt_kind(nt, dyn[0]) == NK_AssocSplatNode &&
+                 nt_ref(nt, dyn[0], "value") >= 0 && blockarg_plain_read(nt, bexp);
     if (simple) {
       int hc = sd_hold(c, nt, NULL, id, "kwh", -1, sd_bcall(nt, "__kw_hash", -1, (int[]){ nt_ref(nt, dyn[0], "value") }, 1), pre, &npre);
       nt_node_set_ref(nt, dyn[0], "value", hc);
@@ -45864,7 +45909,7 @@ static void split_kwsplat_calls(Compiler *c, int from) {
     if (col >= 0) nt_node_set_int(nt, id, "node_col", col);
   }
   for (int i = 0; i < al.n; i++) { free(al.new_[i]); free(al.old_[i]); }
-  free(al.new_); free(al.old_); anh_free(&al.gated);
+  free(al.new_); free(al.old_); anh_free(&al.gated); anh_free(&kwrest);
   free(spar);
   comp_grow_node_arrays(c);
 }
