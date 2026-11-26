@@ -10,3 +10,14 @@ module Net
   end
 end
 p Socket.new(3).h, Net::Socket.new.x
+
+# A subclass of the program's own Socket or TCPSocket is a plain subclass.
+class WebSock < Socket
+end
+class TCPSocket
+  attr_reader :a
+  def initialize(a) = @a = a
+end
+class My < TCPSocket
+end
+p WebSock.new(4).h, My.new(5).a

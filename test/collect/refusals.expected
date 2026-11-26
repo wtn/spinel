@@ -372,6 +372,10 @@ spinel: 1 refusal, nothing written
 == test/reject/builtin_singleton_super_new.rb [promote] rc=1
 spinel: test/reject/builtin_singleton_super_new.rb:4: File.new: super to an inherited builtin singleton method is not supported; see docs/limitations.md
 spinel: 1 refusal, nothing written
+== test/reject/class_basicsocket_io_no_socket.rb [default] rc=1
+spinel: test/reject/class_basicsocket_io_no_socket.rb:3: class BasicSocket < IO: subclassing IO is not supported yet (a subclass would answer differently from CRuby); wrap an IO in an instance variable instead
+== test/reject/class_basicsocket_io_no_socket.rb [promote] rc=1
+spinel: test/reject/class_basicsocket_io_no_socket.rb:3: class BasicSocket < IO: subclassing IO is not supported yet (a subclass would answer differently from CRuby); wrap an IO in an instance variable instead
 == test/reject/class_body_block_next.rb [default] rc=1
 spinel: test/reject/class_body_block_next.rb:7: next in a block that is a class body (the block of Class.new, Module.new, Struct.new or Data.define): the definitions after it would be made or not at run time
 == test/reject/class_body_block_next.rb [promote] rc=1
@@ -578,6 +582,10 @@ spinel: 1 refusal, nothing written
 spinel: test/reject/class_named_like_monitor_path.rb:4: unsupported class name 'Monitor': collides with the builtin class of that name
 == test/reject/class_named_like_monitor_path.rb [promote] rc=1
 spinel: test/reject/class_named_like_monitor_path.rb:4: unsupported class name 'Monitor': collides with the builtin class of that name
+== test/reject/class_new_basicsocket_builder.rb [default] rc=1
+spinel: test/reject/class_new_basicsocket_builder.rb:4: class Socket < BasicSocket: subclassing BasicSocket is not supported yet (a subclass would answer differently from CRuby); wrap a BasicSocket in an instance variable instead
+== test/reject/class_new_basicsocket_builder.rb [promote] rc=1
+spinel: test/reject/class_new_basicsocket_builder.rb:4: class Socket < BasicSocket: subclassing BasicSocket is not supported yet (a subclass would answer differently from CRuby); wrap a BasicSocket in an instance variable instead
 == test/reject/class_new_captured_attr_reader.rb [default] rc=1
 spinel: test/reject/class_new_captured_attr_reader.rb:6: Class.new or Module.new with a block that captures outer locals is not supported; see docs/limitations.md
 spinel: 1 refusal, nothing written
@@ -796,6 +804,10 @@ spinel: test/reject/class_reopens_sized_queue.rb:3: reopening the builtin class 
 spinel: test/reject/class_subclasses_monitor.rb:5: class A::Monitor < Monitor: subclassing Monitor is not supported yet (a subclass would answer differently from CRuby); wrap a Monitor in an instance variable instead
 == test/reject/class_subclasses_monitor.rb [promote] rc=1
 spinel: test/reject/class_subclasses_monitor.rb:5: class A::Monitor < Monitor: subclassing Monitor is not supported yet (a subclass would answer differently from CRuby); wrap a Monitor in an instance variable instead
+== test/reject/class_subclasses_tcpsocket.rb [default] rc=1
+spinel: test/reject/class_subclasses_tcpsocket.rb:5: class MySock < TCPSocket: subclassing TCPSocket is not supported yet (a subclass would answer differently from CRuby); wrap a TCPSocket in an instance variable instead
+== test/reject/class_subclasses_tcpsocket.rb [promote] rc=1
+spinel: test/reject/class_subclasses_tcpsocket.rb:5: class MySock < TCPSocket: subclassing TCPSocket is not supported yet (a subclass would answer differently from CRuby); wrap a TCPSocket in an instance variable instead
 == test/reject/class_superclass_method_call.rb [default] rc=1
 spinel: test/reject/class_superclass_method_call.rb:10: unsupported superclass expression (a call other than Struct.new, Data.define, a Struct subclass's new or a blockless Class.new(Constant)): write the superclass as a constant
 == test/reject/class_superclass_method_call.rb [promote] rc=1

@@ -7936,13 +7936,20 @@ static const char *builtin_value_superclass(Compiler *c, int sc) {
     "Integer", "Float", "Symbol", "Rational", "Complex",
     "NilClass", "TrueClass", "FalseClass", "Regexp", "MatchData", "Time",
     "Random", "Enumerator", "IO", "File", "Dir", "Thread", "Fiber", "Mutex",
-    "Queue", "SizedQueue", "ConditionVariable", "OpenStruct", "Monitor", NULL };
+    "Queue", "SizedQueue", "ConditionVariable", "OpenStruct", "Monitor",
+    "BasicSocket", "IPSocket", "TCPSocket", "TCPServer", "UDPSocket",
+    "UNIXSocket", "UNIXServer", "Socket", NULL };
+  /* a socket class is the builtin only in a program that requires socket */
+  static const char *const sockets[] = {
+    "BasicSocket", "IPSocket", "TCPSocket", "TCPServer", "UDPSocket",
+    "UNIXSocket", "UNIXServer", "Socket", NULL };
   const NodeTable *nt = c->nt;
   if (sc < 0) return NULL;
   NodeKind k = nt_kind(nt, sc);
   if (k != NK_ConstantReadNode && k != NK_ConstantPathNode) return NULL;
   const char *nm = key_name(c, sc);
   if (!nm || !str_in(nm, refused)) return NULL;
+  if (str_in(nm, sockets) && !io_family_name(nm)) return NULL;
   if (k == NK_ConstantPathNode) {
     int par = nt_ref(nt, sc, "parent");
     if (par >= 0) {
@@ -7998,6 +8005,12 @@ static void check_builtin_subclasses(Compiler *c) {
     int hc = cp >= 0 && nt_str(nt, cp, "qc_name") ? elab_header_class(c, id, NULL, NULL) : -1;
     const char *cn = hc >= 0 ? class_ruby_name(c, hc) : class_def_key(c, id);
     const char *par = refused_builtin_superclass(c, sc);
+    /* a reopen of an IO-family builtin with its own superclass
+       (`class Socket < BasicSocket`); `Socket = Class.new(BasicSocket) {}`
+       makes a new class */
+    if (par && cn && io_family_name(cn) && io_super_name(cn) && sp_streq(io_super_name(cn), par) &&
+        class_def_builder(nt, id) < 0)
+      continue;
     /* an Array or Hash subclass is supported (mark_array_subclasses), beside
        a reopen of its builtin too: the reopen's methods are the builtin's
        (comp_arysub_reopen) */
