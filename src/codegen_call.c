@@ -5104,6 +5104,21 @@ static void emit_dyn_name_sym(Compiler *c, int sym, Buf *b) {
    switch over the name's symbol for arm, a call of the arm's name, unless
    a case of its name came first (seen) or the arm does not resolve or
    cannot be emitted. */
+/* Does a builtin's `name` answer an Enumerator when called without a block
+   (CRuby's iterators of Array, Hash, String, Range and Integer)? */
+static int blockless_answers_enumerator(const char *name) {
+  static const char *const names[] = {
+    "each", "each_with_index", "each_with_object", "each_entry", "each_slice", "each_cons", "each_index",
+    "each_key", "each_value", "each_pair", "each_char", "each_byte", "each_line", "each_codepoint",
+    "each_grapheme_cluster", "reverse_each", "map", "collect", "flat_map", "collect_concat", "map!", "collect!",
+    "select", "filter", "filter_map", "reject", "find_all", "select!", "filter!", "reject!", "delete_if",
+    "keep_if", "find", "detect", "find_index", "index", "rindex", "sort_by", "sort_by!", "group_by", "min_by",
+    "max_by", "minmax_by", "partition", "take_while", "drop_while", "chunk_while", "slice_when", "cycle",
+    "times", "upto", "downto", "step", "transform_values", "transform_keys", "uniq!", NULL };
+  for (int i = 0; names[i]; i++) if (sp_streq(name, names[i])) return 1;
+  return 0;
+}
+
 static void emit_dynamic_send_arm(Compiler *c, int arm, int t, int mo, int *seen, int *nseen, Buf *b) {
   const NodeTable *nt = c->nt;
   TyKind at = repr_of(c, arm).as_ty;
@@ -5166,11 +5181,94 @@ static void emit_dynamic_send_arm(Compiler *c, int arm, int t, int mo, int *seen
        `:name` is emitted: interning it here cost a table probe per arm per
        call (#4854). A name interned at run time resolves to the same id. */
     buf_printf(b, "case %d: { ", comp_sym_intern(c, nm));
+    /* A builtin's arm that forwards `&block` is also emitted without it,
+       taken when the block is nil: a route that serves a literal block may
+       not serve a forwarded one, and the send gave none (`__send__(name,
+       &block)` with no block) */
+    int ba = nt_ref(nt, arm, "block"), split = 0;
+    Buf pre2 = {0, 0, 0}, body2 = {0, 0, 0}, bx = {0, 0, 0};
+    /* (not a name whose blockless form answers an Enumerator, a value of
+       another type than the arm's) */
+    int iter = blockless_answers_enumerator(nm);
+    if (ba >= 0 && nt_kind(nt, ba) == NK_BlockArgumentNode && nt_ref(nt, ba, "expression") >= 0 && mi < 0 &&
+        !self_ret && !arm_oint && !iter) {
+      ArmProbe ap2; arm_probe_begin(c, &ap2, &pre2);
+      volatile int ok2 = 0;
+      nt_node_set_ref((NodeTable *)nt, arm, "block", -1);
+      if (setjmp(g_unsup_recover) == 0) {
+        if (arm_str) emit_boxed(c, arm, &body2); else emit_expr(c, arm, &body2);
+        ok2 = 1;
+      }
+      else arm_probe_dropped(&ap2);
+      nt_node_set_ref((NodeTable *)nt, arm, "block", ba);
+      arm_probe_end(c, &ap2, ok2);
+      if (ok2) {
+        /* in a splice the forwarded block is the caller's: none, a literal
+           block, or a real proc tested at run time */
+        int rb = resolve_forwarded_block(c, ba);
+        const char *rp = forwarded_real_proc(ba, rb);
+        if (rb < 0 && !rp) split = 2;
+        else if (rb >= 0 && rb != ba) split = 0;
+        else if (rp) {
+          /* (a held proc's name, read twice; a conversion the splice wrote
+             there would run once for the test and once for the arm) */
+          int ident = rp[0] && (isalpha((unsigned char)rp[0]) || rp[0] == '_');
+          for (const char *q = rp; *q && ident; q++) ident = isalnum((unsigned char)*q) || *q == '_';
+          if (ident) { buf_puts(&bx, rp); split = 1; }
+        }
+        else {
+          /* (tested at run time only where reading it again runs nothing: a
+             call's `&mk` keeps the arm as it was, which evaluates it once) */
+          int fe = nt_ref(nt, ba, "expression");
+          NodeKind fk = fe >= 0 ? nt_kind(nt, fe) : NK_NONE;
+          /* (and only a Proc: a Method's or a Curry's conversion to one,
+             boxed or not, would allocate once for the test and once for
+             the arm) */
+          int fproc = comp_ntype(c, fe) == TY_PROC && repr_of(c, fe).kind != RK_BOXED;
+          /* (and only where the arm's arguments run no code: the block is
+             tested ahead of them, and CRuby evaluates them first) */
+          { int an = 0; const int *av = call_args(nt, arm, &an);
+            for (int q = 0; q < an && fproc; q++) {
+              NodeKind ak = nt_kind(nt, av[q]);
+              fproc = ak == NK_LocalVariableReadNode || ak == NK_InstanceVariableReadNode || ak == NK_ConstantReadNode ||
+                      ak == NK_IntegerNode || ak == NK_FloatNode || ak == NK_StringNode || ak == NK_SymbolNode ||
+                      ak == NK_NilNode || ak == NK_TrueNode || ak == NK_FalseNode;
+            } }
+          if (fproc && (fk == NK_LocalVariableReadNode || fk == NK_InstanceVariableReadNode ||
+              fk == NK_ClassVariableReadNode || fk == NK_GlobalVariableReadNode || fk == NK_ConstantReadNode)) {
+            emit_forwarded_proc_arg(c, ba, &bx);
+            split = bx.p != NULL;
+          }
+        }
+      }
+    }
+    if (split == 2) {
+      /* no block reaches the send: the arm without one */
+      if (pre2.p && pre2.len) buf_puts(b, pre2.p);
+      buf_printf(b, "_r%d = ", t);
+      if (arm_str) buf_puts(b, body2.p ? body2.p : "sp_box_nil()");
+      else emit_boxed_text(c, at, body2.p ? body2.p : "0", b);
+      free(pre2.p); free(body2.p); free(bx.p);
+      free(pre.p); free(body.p);
+      buf_puts(b, "; break; }\n");
+      seen[(*nseen)++] = comp_sym_intern(c, nm);
+      return;
+    }
+    if (split) buf_printf(b, "if (%s) { ", bx.p);
     if (pre.p && pre.len) buf_puts(b, pre.p);
     buf_printf(b, "_r%d = ", t);
     if (arm_oint) buf_printf(b, "%s(%s)", oint_box(at), body.p ? body.p : "sp_oint_nil()");
     else if (arm_str) buf_puts(b, body.p ? body.p : "sp_box_nil()");
     else emit_boxed_text(c, self_ret ? TY_STRBUF : at, body.p ? body.p : "0", b);
+    if (split) {
+      buf_puts(b, "; } else { ");
+      if (pre2.p && pre2.len) buf_puts(b, pre2.p);
+      buf_printf(b, "_r%d = ", t);
+      if (arm_str) buf_puts(b, body2.p ? body2.p : "sp_box_nil()");
+      else emit_boxed_text(c, at, body2.p ? body2.p : "0", b);
+      buf_puts(b, "; }");
+    }
+    free(pre2.p); free(body2.p); free(bx.p);
     buf_puts(b, "; break; }\n");
     seen[(*nseen)++] = comp_sym_intern(c, nm);
   }
