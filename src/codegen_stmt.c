@@ -7785,6 +7785,22 @@ static int emit_obj_class_when(Compiler *c, TyKind pt, const char *cn, int pat, 
       if (builtin_class_mixes_module(p, cn)) { emit_obj_live(c, pt, t, b); return 1; }
     }
   }
+  /* a builtin module the class has by name (`include IO::WaitReadable`):
+     the class, or a subclass whose instance the subject may hold */
+  char qb[192];
+  const char *qn = tcid < 0 ? isa_const_qualname(c->nt, pat, qb, sizeof qb) : NULL;
+  if (qn && comp_chain_includes_core(c, cid, qn)) { emit_obj_live(c, pt, t, b); return 1; }
+  if (qn && !comp_ty_value_obj(c, pt)) {
+    int first = 1;
+    for (int k = 0; k < c->nclasses; k++) {
+      if (k == cid || !is_descendant(c, k, cid) || !comp_chain_includes_core(c, k, qn)) continue;
+      if (first) buf_printf(b, obj_subject_nilable(c, pt) ? "(_t%d != NULL && (" : "((", t);
+      else buf_puts(b, " || ");
+      buf_printf(b, "_t%d->cls_id == %d", t, k);
+      first = 0;
+    }
+    if (!first) { buf_puts(b, "))"); return 1; }
+  }
   /* a builtin exception above the class table: the runtime chain answers,
      asked of a live object only (sp_exc_is_a reads the NULL otherwise) */
   Buf eb; memset(&eb, 0, sizeof eb);

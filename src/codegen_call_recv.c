@@ -13216,6 +13216,23 @@ int emit_object_call(Compiler *c, int id, Buf *b) {
           buf_printf(b, ",((sp_Class){%d}))", bid);
           return 1;
         }
+        /* a builtin module the class has by name (`include IO::WaitReadable`):
+           the class, or a subclass whose instance the receiver may hold */
+        char qb[192];
+        const char *qn = isa_const_qualname(nt, argv[0], qb, sizeof qb);
+        if (!uni && !sp_streq(name, "instance_of?") && qn && cid >= 0 && cid < c->nclasses) {
+          if (comp_chain_includes_core(c, cid, qn)) uni = 1;
+          else if (!c->classes[cid].is_value_type) {
+            int t9 = 0;
+            for (int k = 0; k < c->nclasses; k++) {
+              if (k == cid || !is_descendant(c, k, cid) || !comp_chain_includes_core(c, k, qn)) continue;
+              if (!t9) { t9 = ++g_tmp; buf_printf(b, "({ sp_int _t%d = (", t9); emit_expr(c, recv, b); buf_puts(b, ")->cls_id; "); }
+              else buf_puts(b, " || ");
+              buf_printf(b, "_t%d == %d", t9, k);
+            }
+            if (t9) { buf_puts(b, "; })"); return 1; }
+          }
+        }
         buf_puts(b, "(("); emit_expr_for_effect(c, recv, b); buf_printf(b, "), %d)", uni);
         return 1;
       }
