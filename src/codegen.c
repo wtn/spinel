@@ -23029,6 +23029,62 @@ static int builtin_chain_has_module(int bid, int mod) {
   }
 }
 
+/* The include and prepend lists of each class, with the node of the
+   statement that brought each module (-1: none, an `extend`'s). */
+typedef struct { int **incs, *nincs, **inc_at, **preps, *npreps, **prep_at; } AncMods;
+
+/* Did the include or prepend at node sup run before the statement at node
+   at (a node the record does not order: taken as before)? */
+static int anc_ran_before(Compiler *c, int sup, int at) {
+  return at < 0 || sup < 0 || elab_order(c, sup, at) != PROG_AFTER;
+}
+
+/* Did the statement at node a run before the one at node b, both in the
+   record's order? */
+static int anc_ran_earlier(Compiler *c, int a, int b) {
+  return a >= 0 && b >= 0 && elab_order(c, a, b) == PROG_BEFORE;
+}
+
+/* Does class k have module m among the includes or prepends that ran
+   before the statement at node at, or among the includes of a module k
+   prepends? */
+static int anc_mods_has_before(Compiler *c, const AncMods *am, int k, int m, int at) {
+  for (int q = 0; q < am->nincs[k]; q++)
+    if (am->incs[k][q] == m && anc_ran_before(c, am->inc_at[k][q], at)) return 1;
+  for (int q = 0; q < am->npreps[k]; q++) {
+    int p = am->preps[k][q];
+    if (!anc_ran_before(c, am->prep_at[k][q], at)) continue;
+    if (p == m) return 1;
+    for (int j = 0; p >= 0 && p < c->nclasses && j < am->nincs[p]; j++)
+      if (am->incs[p][j] == m && anc_ran_before(c, am->inc_at[p][j], at)) return 1;
+  }
+  return 0;
+}
+
+/* Does a superclass of class ci (a reopened Object too) have module m
+   among the includes or prepends that ran before ci's include of m (the
+   statement at node at), or a builtin superclass on its own chain (Array's
+   Enumerable, also when the program reopens Array or Enumerable)? CRuby's
+   include of m in ci is then a no-op. */
+static int super_has_module(Compiler *c, int ci, int m, int at, const AncMods *am) {
+  if (comp_class_is_module(c, &c->classes[ci])) return 0;
+  int d = 0;
+  for (int k = c->classes[ci].parent; k >= 0 && k < c->nclasses && d < c->nclasses; k = c->classes[k].parent, d++) {
+    if (anc_mods_has_before(c, am, k, m, at)) return 1;
+    if (k == c->classes[k].parent) break;
+  }
+  int root = class_chain_root(c, ci);
+  /* (a chain under BasicObject, reopened or not, has no Object above) */
+  if (class_builtin_parent(c, ci) != -117 && reopened_builtin_class_id(c, root) != -117)
+    for (int k = 0; k < c->nclasses; k++)
+      if (k != ci && reopened_builtin_class_id(c, k) == -116 && anc_mods_has_before(c, am, k, m, at)) return 1;
+  int mb = m < 0 ? m : reopened_builtin_class_id(c, m);
+  if (mb >= 0) return 0;
+  int bid = root != ci && reopened_builtin_chain_id(c, root) ? reopened_builtin_class_id(c, root)
+                                                             : class_builtin_parent(c, ci);
+  return bid < 0 && builtin_chain_has_module(bid, mb);
+}
+
 /* The ancestors walk's steps, on a builtin's arm, through the modules a
    program's reopening of that builtin includes or prepends (mods/nmods per
    class), last one first. A prepended module brings its own includes right
@@ -23440,6 +23496,9 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
        separately from the includes that follow the class (#2702). */
     int **cls_preps = calloc((size_t)c->nclasses, sizeof(int *));
     int  *cls_npreps = calloc((size_t)c->nclasses, sizeof(int));
+    /* the node of the statement that brought each module (super_has_module) */
+    int **cls_inc_at = calloc((size_t)c->nclasses, sizeof(int *));
+    int **cls_prep_at = calloc((size_t)c->nclasses, sizeof(int *));
     /* Each class's includes and prepends as the load record has them, in
        the order they run (a Struct.new block's too): one call's modules
        last first, as `include A, B` includes B first and `prepend A, B`
@@ -23454,6 +23513,7 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
         if ((!prep && mx[g].kind != LR_INCLUDE) || mx[g].cond) continue;
         int **tgt_mods = prep ? cls_preps : cls_incs;
         int  *tgt_n    = prep ? cls_npreps : cls_nincs;
+        int **tgt_at   = prep ? cls_prep_at : cls_inc_at;
         for (int x = g; x < ge; x++) {
           const LrMixin *m = &mx[x];
           int mid2 = elab_mixin_module(c, m);
@@ -23463,7 +23523,9 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
           for (int q = 0; q < tgt_n[ci] && !found2; q++) found2 = tgt_mods[ci][q] == mid2;
           if (found2) continue;
           tgt_mods[ci] = realloc(tgt_mods[ci], sizeof(int) * (size_t)(tgt_n[ci] + 1));
-          if (!tgt_mods[ci]) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
+          tgt_at[ci] = realloc(tgt_at[ci], sizeof(int) * (size_t)(tgt_n[ci] + 1));
+          if (!tgt_mods[ci] || !tgt_at[ci]) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
+          tgt_at[ci][tgt_n[ci]] = m->node;
           tgt_mods[ci][tgt_n[ci]++] = mid2;
         }
       }
@@ -23481,7 +23543,9 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
         for (int q = 0; q < cls_nincs[ci]; q++) if (cls_incs[ci][q] == mid3) { seen3 = 1; break; }
         if (seen3) continue;
         cls_incs[ci] = realloc(cls_incs[ci], sizeof(int) * (size_t)(cls_nincs[ci] + 1));
-        if (!cls_incs[ci]) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
+        cls_inc_at[ci] = realloc(cls_inc_at[ci], sizeof(int) * (size_t)(cls_nincs[ci] + 1));
+        if (!cls_incs[ci] || !cls_inc_at[ci]) { fprintf(stderr, "spinel: out of memory\n"); exit(1); }
+        cls_inc_at[ci][cls_nincs[ci]] = -1;
         cls_incs[ci][cls_nincs[ci]++] = mid3;
       }
     }
@@ -23494,40 +23558,55 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
        below reverses: a module's closure goes right BEFORE the module. */
     {
       int **closed = calloc((size_t)c->nclasses, sizeof(int *));
+      int **closed_at = calloc((size_t)c->nclasses, sizeof(int *));
       int  *nclosed = calloc((size_t)c->nclasses, sizeof(int));
       for (int ci = 0; ci < c->nclasses; ci++) {
-        int *out = NULL, nout = 0;
+        /* (out_at: the node of the last include to run on the path that
+           brought the module) */
+        int *out = NULL, *out_at = NULL, nout = 0;
         /* iterative DFS in include order: push m's closure, then m */
         int *seen = calloc((size_t)c->nclasses, sizeof(int));
         seen[ci] = 1;
         /* frame: (class index, next include position) */
-        int fr_ci[128], fr_q[128]; int nfr = 0;
-        fr_ci[nfr] = ci; fr_q[nfr] = 0; nfr++;
+        int fr_ci[128], fr_q[128], fr_at[128]; int nfr = 0;
+        fr_ci[nfr] = ci; fr_q[nfr] = 0; fr_at[nfr] = -1; nfr++;
         while (nfr > 0) {
           int cur = fr_ci[nfr - 1]; int q = fr_q[nfr - 1];
           if (q >= cls_nincs[cur]) {
             nfr--;
             if (nfr > 0) { int m = cur; int dup = 0;
-              for (int j = 0; j < nout; j++) if (out[j] == m) dup = 1;
-              if (!dup) { out = realloc(out, sizeof(int) * (size_t)(nout + 1)); out[nout++] = m; } }
+              for (int j = 0; j < nout; j++) if (out[j] == m) { dup = 1; if (anc_ran_earlier(c, fr_at[nfr], out_at[j])) out_at[j] = fr_at[nfr]; }
+              if (!dup) { out = realloc(out, sizeof(int) * (size_t)(nout + 1)); out_at = realloc(out_at, sizeof(int) * (size_t)(nout + 1)); out_at[nout] = fr_at[nfr]; out[nout++] = m; } }
             continue;
           }
           fr_q[nfr - 1] = q + 1;
           int m = cls_incs[cur][q];
+          int top = fr_at[nfr - 1], e = cls_inc_at[cur][q];
+          if (top < 0 || (e >= 0 && elab_order(c, top, e) == PROG_BEFORE)) top = e;
           if (m < 0) {   /* a builtin module: no includes of its own */
-            int dup = 0; for (int j = 0; j < nout; j++) if (out[j] == m) dup = 1;
-            if (!dup) { out = realloc(out, sizeof(int) * (size_t)(nout + 1)); out[nout++] = m; }
+            int dup = 0; for (int j = 0; j < nout; j++) if (out[j] == m) { dup = 1; if (anc_ran_earlier(c, top, out_at[j])) out_at[j] = top; }
+            if (!dup) { out = realloc(out, sizeof(int) * (size_t)(nout + 1)); out_at = realloc(out_at, sizeof(int) * (size_t)(nout + 1)); out_at[nout] = top; out[nout++] = m; }
             continue;
           }
-          if (m >= c->nclasses || seen[m] || nfr >= 128) continue;
+          if (m >= c->nclasses || nfr >= 128) continue;
+          if (seen[m]) {
+            /* (reached again on a path that ran earlier: walked again with the earlier node) */
+            int j = 0;
+            while (j < nout && out[j] != m) j++;
+            if (j == nout || !anc_ran_earlier(c, top, out_at[j])) continue;
+            out_at[j] = top;
+          }
           seen[m] = 1;
-          fr_ci[nfr] = m; fr_q[nfr] = 0; nfr++;
+          fr_ci[nfr] = m; fr_q[nfr] = 0; fr_at[nfr] = top; nfr++;
         }
         free(seen);
-        closed[ci] = out; nclosed[ci] = nout;
+        closed[ci] = out; closed_at[ci] = out_at; nclosed[ci] = nout;
       }
-      for (int ci = 0; ci < c->nclasses; ci++) { free(cls_incs[ci]); cls_incs[ci] = closed[ci]; cls_nincs[ci] = nclosed[ci]; }
-      free(closed); free(nclosed);
+      for (int ci = 0; ci < c->nclasses; ci++) {
+        free(cls_incs[ci]); cls_incs[ci] = closed[ci]; cls_nincs[ci] = nclosed[ci];
+        free(cls_inc_at[ci]); cls_inc_at[ci] = closed_at[ci];
+      }
+      free(closed); free(closed_at); free(nclosed);
     }
     /* The ancestors walk, emitted once with the include info. With an
        array `a` it pushes each ancestor in order (sp_class_ancestors); with
@@ -23636,7 +23715,11 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
       buf_printf(b, "    case %d:", ci);
       /* Ruby includes are prepended: last include is highest priority, so
          insert in reverse include order after the class itself. */
-      for (int q = cls_nincs[ci] - 1; q >= 0; q--) { buf_puts(b, " "); emit_anc_mod_step(b, cls_incs[ci][q]); }
+      const AncMods am = { cls_incs, cls_nincs, cls_inc_at, cls_preps, cls_npreps, cls_prep_at };
+      for (int q = cls_nincs[ci] - 1; q >= 0; q--) {
+        if (super_has_module(c, ci, cls_incs[ci][q], cls_inc_at[ci][q], &am)) continue;
+        buf_puts(b, " "); emit_anc_mod_step(b, cls_incs[ci][q]);
+      }
       buf_puts(b, " break;\n");
     }
     buf_puts(b, "    }\n");
@@ -23821,8 +23904,8 @@ static void emit_class_machinery(const NodeTable *nt, Compiler *c, Buf *b, char 
       "  case 3: return sp_class_ge3(x,y);\n"
       "  default: return sp_class_cmp3(x,y);\n"
       "  }\n}\n");
-    for (int ci = 0; ci < c->nclasses; ci++) { free(cls_incs[ci]); free(cls_preps[ci]); }
-    free(cls_incs); free(cls_nincs); free(cls_preps); free(cls_npreps);
+    for (int ci = 0; ci < c->nclasses; ci++) { free(cls_incs[ci]); free(cls_preps[ci]); free(cls_inc_at[ci]); free(cls_prep_at[ci]); }
+    free(cls_incs); free(cls_nincs); free(cls_preps); free(cls_npreps); free(cls_inc_at); free(cls_prep_at);
   }
   /* User exception hierarchy: sp_user_exc_parent(cls) -> parent class name.
      Used by sp_exc_cls_matches (rescue arms) and sp_exc_is_a (is_a?). */
