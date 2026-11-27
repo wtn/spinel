@@ -9538,6 +9538,34 @@ static void class_note_mod_name(ClassInfo *ci, const char *name) {
   }
   ci->included_mod_names[ci->nincluded_mod_names++] = strdup(name);
 }
+/* class_note_mod_name for the module path `arg` (leaf mname), by its
+   qualified name. */
+static void class_note_path_mod_name(Compiler *c, int ci, int arg, const char *mname) {
+  const NodeTable *nt = c->nt;
+  char segs[8][64]; int nseg = 0;
+  int qpar = nt_ref(nt, arg, "parent");
+  while (qpar >= 0 && nseg < 8) {
+    NodeKind pk = nt_kind(nt, qpar);
+    const char *pn = nt_str(nt, qpar, "name");
+    if (pk == NK_ConstantReadNode && pn) {
+      snprintf(segs[nseg++], sizeof segs[0], "%s", pn);
+      break;
+    }
+    if (pk == NK_ConstantPathNode) {
+      if (pn) snprintf(segs[nseg++], sizeof segs[0], "%s", pn);
+      qpar = nt_ref(nt, qpar, "parent");
+      continue;
+    }
+    break;
+  }
+  char qual[256]; qual[0] = 0;
+  for (int q = nseg - 1; q >= 0; q--) {
+    strncat(qual, segs[q], sizeof qual - strlen(qual) - 1);
+    strncat(qual, "::", sizeof qual - strlen(qual) - 1);
+  }
+  strncat(qual, mname, sizeof qual - strlen(qual) - 1);
+  class_note_mod_name(&c->classes[ci], qual);
+}
 /* Does the builtin root of class ci's chain have builtin module `mod` among its ancestors already (Kernel, under
    Object)? CRuby's include of it is then a no-op, and the class's own ancestry does not gain it. */
 static int mod_in_root_ancestors(Compiler *c, int ci, const char *mod) {
@@ -9573,6 +9601,7 @@ void process_include_body(Compiler *c, int ci, int body_node) {
         c->classes[ci].cmp_prepended = 2;
       if (is_enumerable_module_name(mname)) c->classes[ci].enum_prepended = 1;
       if (mod_id >= 0) class_note_prepended_mod(c, ci, mod_id);
+      else if (ak == NK_ConstantPathNode && mname) class_note_path_mod_name(c, ci, arg, mname);
       continue;
     }
     if (is_comparable_module_name(mname) && !c->classes[ci].cmp_inc_at)
@@ -9588,31 +9617,7 @@ void process_include_body(Compiler *c, int ci, int body_node) {
          what `rescue IO::WaitReadable` compares against, since the module
          match is by name. Silently dropping these left the include with no
          effect at all (#1054, read_nonblock). */
-      if (ak == NK_ConstantPathNode && mname) {
-        char segs[8][64]; int nseg = 0;
-        int qpar = nt_ref(nt, arg, "parent");
-        while (qpar >= 0 && nseg < 8) {
-          NodeKind pk = nt_kind(nt, qpar);
-          const char *pn = nt_str(nt, qpar, "name");
-          if (pk == NK_ConstantReadNode && pn) {
-            snprintf(segs[nseg++], sizeof segs[0], "%s", pn);
-            break;
-          }
-          if (pk == NK_ConstantPathNode) {
-            if (pn) snprintf(segs[nseg++], sizeof segs[0], "%s", pn);
-            qpar = nt_ref(nt, qpar, "parent");
-            continue;
-          }
-          break;
-        }
-        char qual[256]; qual[0] = 0;
-        for (int q = nseg - 1; q >= 0; q--) {
-          strncat(qual, segs[q], sizeof qual - strlen(qual) - 1);
-          strncat(qual, "::", sizeof qual - strlen(qual) - 1);
-        }
-        strncat(qual, mname, sizeof qual - strlen(qual) - 1);
-        class_note_mod_name(&c->classes[ci], qual);
-      }
+      if (ak == NK_ConstantPathNode && mname) class_note_path_mod_name(c, ci, arg, mname);
       /* (a builtin module named bare, `include Math`: the class's fact as the path form is, unless its builtin root has it
          among its ancestors already, where CRuby's include is a no-op (`include Kernel`); Comparable and Enumerable
          have their own flags above) */
